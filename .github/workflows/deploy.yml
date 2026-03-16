@@ -267,14 +267,51 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           echo "检查并创建 Queue..."
-          QUEUE_LIST=$(bunx wrangler queues list --json --config apps/worker/wrangler.toml 2>/dev/null || echo "[]")
-          EXISTING_QUEUE=$(echo "$QUEUE_LIST" | jq -r '.[] | select(.name=="usage-events") | .name')
+          QUEUE_LIST_RAW=$(bunx wrangler queues list --json --config apps/worker/wrangler.toml 2>/dev/null || echo "[]")
+          QUEUE_EXISTS=$(QUEUE_LIST_RAW="$QUEUE_LIST_RAW" node - <<'NODE'
+          const raw = process.env.QUEUE_LIST_RAW || "";
+          const target = "usage-events";
+          const first = raw.search(/[\[{]/);
+          let jsonText = raw;
+          if (first >= 0) {
+            jsonText = raw.slice(first);
+          }
+          let list = null;
+          try {
+            list = JSON.parse(jsonText);
+          } catch {
+            const last = raw.lastIndexOf("]");
+            if (first >= 0 && last > first) {
+              try {
+                list = JSON.parse(raw.slice(first, last + 1));
+              } catch {}
+            }
+          }
+          if (!Array.isArray(list)) {
+            console.log("unknown");
+            process.exit(0);
+          }
+          const exists = list.some((item) => item && item.name === target);
+          console.log(exists ? "true" : "false");
+NODE
+          )
 
-          if [ -n "$EXISTING_QUEUE" ]; then
+          if [ "$QUEUE_EXISTS" = "true" ]; then
             echo "✅ Queue 已存在: usage-events"
           else
             echo "创建 Queue: usage-events"
-            bunx wrangler queues create usage-events --config apps/worker/wrangler.toml
+            CREATE_OUTPUT=$(bunx wrangler queues create usage-events --config apps/worker/wrangler.toml 2>&1)
+            CREATE_STATUS=$?
+            if [ $CREATE_STATUS -eq 0 ]; then
+              echo "✅ Queue 已创建: usage-events"
+            else
+              if echo "$CREATE_OUTPUT" | grep -qi "already exists"; then
+                echo "✅ Queue 已存在: usage-events"
+              else
+                echo "$CREATE_OUTPUT"
+                exit $CREATE_STATUS
+              fi
+            fi
           fi
 
       - name: Create D1 database (init only)
@@ -383,14 +420,51 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           echo "检查并创建 Queue..."
-          QUEUE_LIST=$(bunx wrangler queues list --json --config apps/worker/wrangler.toml 2>/dev/null || echo "[]")
-          EXISTING_QUEUE=$(echo "$QUEUE_LIST" | jq -r '.[] | select(.name=="usage-events") | .name')
+          QUEUE_LIST_RAW=$(bunx wrangler queues list --json --config apps/worker/wrangler.toml 2>/dev/null || echo "[]")
+          QUEUE_EXISTS=$(QUEUE_LIST_RAW="$QUEUE_LIST_RAW" node - <<'NODE'
+          const raw = process.env.QUEUE_LIST_RAW || "";
+          const target = "usage-events";
+          const first = raw.search(/[\[{]/);
+          let jsonText = raw;
+          if (first >= 0) {
+            jsonText = raw.slice(first);
+          }
+          let list = null;
+          try {
+            list = JSON.parse(jsonText);
+          } catch {
+            const last = raw.lastIndexOf("]");
+            if (first >= 0 && last > first) {
+              try {
+                list = JSON.parse(raw.slice(first, last + 1));
+              } catch {}
+            }
+          }
+          if (!Array.isArray(list)) {
+            console.log("unknown");
+            process.exit(0);
+          }
+          const exists = list.some((item) => item && item.name === target);
+          console.log(exists ? "true" : "false");
+NODE
+          )
 
-          if [ -n "$EXISTING_QUEUE" ]; then
+          if [ "$QUEUE_EXISTS" = "true" ]; then
             echo "✅ Queue 已存在: usage-events"
           else
             echo "创建 Queue: usage-events"
-            bunx wrangler queues create usage-events --config apps/worker/wrangler.toml
+            CREATE_OUTPUT=$(bunx wrangler queues create usage-events --config apps/worker/wrangler.toml 2>&1)
+            CREATE_STATUS=$?
+            if [ $CREATE_STATUS -eq 0 ]; then
+              echo "✅ Queue 已创建: usage-events"
+            else
+              if echo "$CREATE_OUTPUT" | grep -qi "already exists"; then
+                echo "✅ Queue 已存在: usage-events"
+              else
+                echo "$CREATE_OUTPUT"
+                exit $CREATE_STATUS
+              fi
+            fi
           fi
 
       - name: Create or verify D1 Database

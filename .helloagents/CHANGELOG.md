@@ -190,6 +190,9 @@
 
 ### 修复
 
+- **[deploy-workflow]**: 队列检查改为 Node 解析并容错非 JSON 输出 — by lsy
+  - 方案: [202603162220_deploy-queue-json-parse](archive/2026-03/202603162220_deploy-queue-json-parse/)
+  - 决策: deploy-queue-json-parse#D001(队列列表解析方式选择)
 - **[admin-ui]**: Toast 通知固定右上并带进度条，弹窗改为全屏遮罩，筛选标题横排 — by lsy
   - 方案: [202603160049_modal-toast-search-fixes](archive/2026-03/202603160049_modal-toast-search-fixes/)
   - 决策: modal-toast-search-fixes#D001(通知统一为右上 Toast)
