@@ -1,5 +1,6 @@
 import type {
 	AdminData,
+	DashboardQuery,
 	SettingsForm,
 	SiteForm,
 	TabItem,
@@ -50,6 +51,16 @@ export const initialSettingsForm: SettingsForm = {
 	admin_password: "",
 	checkin_schedule_time: "00:10",
 	model_failure_cooldown_minutes: "10",
+};
+
+export const initialDashboardQuery: DashboardQuery = {
+	preset: "all",
+	interval: "month",
+	from: "",
+	to: "",
+	channel_ids: [],
+	token_ids: [],
+	model: "",
 };
 
 export const initialTokenForm: TokenForm = {

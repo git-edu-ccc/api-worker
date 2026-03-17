@@ -11,6 +11,16 @@
 
 - **[deploy/proxy/settings]**: 调整 stream usage 默认值并避免部署覆盖云端变量 — by lsy
   - 方案: [202603170025_runtime-defaults-no-override](archive/2026-03/202603170025_runtime-defaults-no-override/)
+- **[admin-ui/usage]**: 使用日志渠道筛选改为搜索多选，分页条数与列偏好本地记忆 — by lsy
+  - 方案: [202603170949_shadcn-unified-ui](archive/2026-03/202603170949_shadcn-unified-ui/)
+- **[admin-ui/usage]**: 状态展示改为仅显示上游状态码并在详情弹窗展示完整错误摘要 — by lsy
+  - 方案: [202603170949_shadcn-unified-ui](archive/2026-03/202603170949_shadcn-unified-ui/)
+- **[admin-ui/usage]**: 修复使用日志多选下拉的宽度与定位 — by lsy
+  - 方案: [202603170949_shadcn-unified-ui](archive/2026-03/202603170949_shadcn-unified-ui/)
+- **[admin-ui]**: 页面布局拆分为标题/筛选/数据区，数据面板筛选条更紧凑 — by lsy
+  - 方案: [202603170949_shadcn-unified-ui](archive/2026-03/202603170949_shadcn-unified-ui/)
+- **[usage]**: 使用日志筛选支持渠道/令牌/模型/状态多选查询 — by lsy
+  - 方案: [202603170949_shadcn-unified-ui](archive/2026-03/202603170949_shadcn-unified-ui/)
 - **[deploy-workflow]**: 本地部署脚本改为纯本地流程（构建 + 本地迁移） — by lsy
   - 方案: [202603162008_local-deploy-local-only](archive/2026-03/202603162008_local-deploy-local-only/)
 - **[settings/admin-ui]**: 设置接口返回运行时配置，管理台只读展示并指引环境变量配置
@@ -197,6 +207,10 @@
 - **[deploy-workflow]**: 队列检查改为 Node 解析并容错非 JSON 输出 — by lsy
   - 方案: [202603162220_deploy-queue-json-parse](archive/2026-03/202603162220_deploy-queue-json-parse/)
   - 决策: deploy-queue-json-parse#D001(队列列表解析方式选择)
+- **[dashboard]**: 修复数据面板筛选 SQL 歧义导致的 500 错误 — by lsy
+  - 方案: [202603170949_shadcn-unified-ui](archive/2026-03/202603170949_shadcn-unified-ui/)
+- **[admin-ui/sites]**: 修复站点管理筛选区域 JSX 结构错误导致构建失败 — by lsy
+  - 方案: [202603170949_shadcn-unified-ui](archive/2026-03/202603170949_shadcn-unified-ui/)
 - **[admin-ui]**: Toast 通知固定右上并带进度条，弹窗改为全屏遮罩，筛选标题横排 — by lsy
   - 方案: [202603160049_modal-toast-search-fixes](archive/2026-03/202603160049_modal-toast-search-fixes/)
   - 决策: modal-toast-search-fixes#D001(通知统一为右上 Toast)

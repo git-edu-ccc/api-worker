@@ -6,13 +6,35 @@ const dashboard = new Hono<AppEnv>();
 function buildDateFilters(query: Record<string, string>) {
 	let sql = " WHERE 1=1";
 	const params: Array<string> = [];
+	const channelIds = (query.channel_ids ?? "")
+		.split(",")
+		.map((value) => value.trim())
+		.filter(Boolean);
+	const tokenIds = (query.token_ids ?? "")
+		.split(",")
+		.map((value) => value.trim())
+		.filter(Boolean);
 	if (query.from) {
-		sql += " AND created_at >= ?";
+		sql += " AND usage_logs.created_at >= ?";
 		params.push(query.from);
 	}
 	if (query.to) {
-		sql += " AND created_at <= ?";
+		sql += " AND usage_logs.created_at <= ?";
 		params.push(query.to);
+	}
+	if (query.model) {
+		sql += " AND usage_logs.model LIKE ? COLLATE NOCASE";
+		params.push(`%${query.model}%`);
+	}
+	if (channelIds.length > 0) {
+		sql += ` AND usage_logs.channel_id IN (${channelIds
+			.map(() => "?")
+			.join(",")})`;
+		params.push(...channelIds);
+	}
+	if (tokenIds.length > 0) {
+		sql += ` AND usage_logs.token_id IN (${tokenIds.map(() => "?").join(",")})`;
+		params.push(...tokenIds);
 	}
 	return { sql, params };
 }
@@ -22,7 +44,20 @@ function buildDateFilters(query: Record<string, string>) {
  */
 dashboard.get("/", async (c) => {
 	const query = c.req.query();
+	const interval =
+		query.interval === "week" || query.interval === "month"
+			? query.interval
+			: "day";
+	const rawLimit = Number(query.limit ?? 30);
+	const normalizedLimit = Number.isNaN(rawLimit) ? 30 : Math.floor(rawLimit);
+	const limit = Math.min(Math.max(normalizedLimit, 1), 366);
 	const { sql, params } = buildDateFilters(query);
+	const bucketExpression =
+		interval === "week"
+			? "strftime('%Y-W%W', created_at)"
+			: interval === "month"
+				? "substr(created_at, 1, 7)"
+				: "substr(created_at, 1, 10)";
 
 	const summary = await c.env.DB.prepare(
 		`SELECT COUNT(*) as total_requests, COALESCE(SUM(total_tokens), 0) as total_tokens, COALESCE(AVG(latency_ms), 0) as avg_latency, COALESCE(SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END), 0) as total_errors FROM usage_logs${sql}`,
@@ -30,10 +65,10 @@ dashboard.get("/", async (c) => {
 		.bind(...params)
 		.first();
 
-	const byDay = await c.env.DB.prepare(
-		`SELECT substr(created_at, 1, 10) as day, COUNT(*) as requests, COALESCE(SUM(total_tokens), 0) as tokens FROM usage_logs${sql} GROUP BY day ORDER BY day DESC LIMIT 30`,
+	const trend = await c.env.DB.prepare(
+		`SELECT ${bucketExpression} as bucket, COUNT(*) as requests, COALESCE(SUM(total_tokens), 0) as tokens FROM usage_logs${sql} GROUP BY bucket ORDER BY bucket ASC LIMIT ?`,
 	)
-		.bind(...params)
+		.bind(...params, limit)
 		.all();
 
 	const byModel = await c.env.DB.prepare(
@@ -61,7 +96,8 @@ dashboard.get("/", async (c) => {
 			avg_latency: 0,
 			total_errors: 0,
 		},
-		byDay: byDay.results ?? [],
+		trend: trend.results ?? [],
+		interval,
 		byModel: byModel.results ?? [],
 		byChannel: byChannel.results ?? [],
 		byToken: byToken.results ?? [],

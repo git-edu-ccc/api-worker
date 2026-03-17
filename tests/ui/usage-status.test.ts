@@ -16,13 +16,12 @@ const buildLog = (partial: Partial<{ status: string; upstream_status: number | n
 });
 
 describe("usage status detail", () => {
-	it("renders success label", () => {
+	it("renders unknown when no status code", () => {
 		const detail = buildUsageStatusDetail(buildLog({ status: "ok" }) as any);
-		expect(detail.label).toBe("-");
-		expect(detail.tone).toBe("success");
+		expect(detail.label).toBe("未知");
 	});
 
-	it("renders failure with status code", () => {
+	it("renders status code only", () => {
 		const detail = buildUsageStatusDetail(
 			buildLog({
 				status: "error",
@@ -32,6 +31,5 @@ describe("usage status detail", () => {
 			}) as any,
 		);
 		expect(detail.label).toBe("403");
-		expect(detail.tone).toBe("error");
 	});
 });

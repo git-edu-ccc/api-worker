@@ -15,10 +15,10 @@
 - 保留天数可配置，查询时触发清理
 - 查询结果附带渠道与令牌名称
 - `GET /api/usage` 支持 `offset/limit` 分页并返回 `total`
-- 支持按 `model/channel/token/status` 关键词搜索（保留 `channel_id/token_id` 精确过滤）
+- 支持按 `model/channel/token/status` 关键词搜索（保留 `channel_id/token_id` 精确过滤，新增 `channel_ids`/`token_ids`/`models`/`statuses` 多选过滤）
 - usage_logs 记录输入/输出 tokens、首 token 延迟、流式标记与推理强度
 - 推理强度来自请求体 `reasoning` / `reasoning_effort` 字段
-- usage_logs 记录上游失败详情（status/code/message），日志列表仅展示状态码，详情弹窗仅展示元信息（不展示错误片段）
+- usage_logs 记录上游失败详情（status/code/message），日志列表仅展示上游状态码，缺失时显示“未知”，详情弹窗包含元信息与错误摘要
 
 ## 依赖关系
 - `usage_logs` 表

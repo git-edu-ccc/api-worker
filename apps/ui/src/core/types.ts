@@ -69,10 +69,12 @@ export type UsageLog = {
 };
 
 export type UsageQuery = {
-	channel: string;
-	token: string;
-	model: string;
-	status: string;
+	channel_ids: string[];
+	token_ids: string[];
+	models: string[];
+	statuses: string[];
+	from: string;
+	to: string;
 };
 
 export type UsageResponse = {
@@ -89,10 +91,29 @@ export type DashboardData = {
 		avg_latency: number;
 		total_errors: number;
 	};
-	byDay: Array<{ day: string; requests: number; tokens: number }>;
+	interval: "day" | "week" | "month";
+	trend: Array<{ bucket: string; requests: number; tokens: number }>;
 	byModel: Array<{ model: string; requests: number; tokens: number }>;
 	byChannel: Array<{ channel_name: string; requests: number; tokens: number }>;
 	byToken: Array<{ token_name: string; requests: number; tokens: number }>;
+};
+
+export type DashboardRangePreset =
+	| "all"
+	| "7d"
+	| "30d"
+	| "90d"
+	| "1y"
+	| "custom";
+
+export type DashboardQuery = {
+	preset: DashboardRangePreset;
+	interval: "day" | "week" | "month";
+	from: string;
+	to: string;
+	channel_ids: string[];
+	token_ids: string[];
+	model: string;
 };
 
 export type Settings = {

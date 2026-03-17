@@ -7,8 +7,18 @@ import {
 	useRef,
 	useState,
 } from "hono/jsx/dom";
+import {
+	Button,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "./components/ui";
 import { createApiFetch } from "./core/api";
 import {
+	initialDashboardQuery,
 	initialData,
 	initialSettingsForm,
 	initialSiteForm,
@@ -26,6 +36,7 @@ import type {
 	AdminData,
 	CheckinSummary,
 	DashboardData,
+	DashboardQuery,
 	NoticeMessage,
 	NoticeTone,
 	Settings,
@@ -40,6 +51,9 @@ import type {
 	UsageResponse,
 } from "./core/types";
 import {
+	getBeijingDateString,
+	loadPageSizePref,
+	persistPageSizePref,
 	toChinaDateTimeInput,
 	toChinaIsoFromInput,
 	toggleStatus,
@@ -102,10 +116,99 @@ const buildActionKey = (scope: string, id?: string) =>
 	id ? `${scope}:${id}` : scope;
 
 const initialUsageQuery: UsageQuery = {
-	channel: "",
-	token: "",
-	model: "",
-	status: "",
+	channel_ids: [],
+	token_ids: [],
+	models: [],
+	statuses: [],
+	from: "",
+	to: "",
+};
+
+const dashboardPresetDays: Record<DashboardQuery["preset"], number> = {
+	all: 0,
+	"7d": 7,
+	"30d": 30,
+	"90d": 90,
+	"1y": 365,
+	custom: 30,
+};
+
+const resolveDashboardRange = (query: DashboardQuery) => {
+	const today = new Date();
+	if (query.preset === "all") {
+		return { from: "", to: "", days: 0 };
+	}
+	if (query.preset !== "custom") {
+		const days = dashboardPresetDays[query.preset];
+		const fromDate = new Date(today);
+		fromDate.setDate(today.getDate() - (days - 1));
+		return {
+			from: getBeijingDateString(fromDate),
+			to: getBeijingDateString(today),
+			days,
+		};
+	}
+	const fromValue = query.from || getBeijingDateString(today);
+	const toValue = query.to || getBeijingDateString(today);
+	const fromDate = new Date(fromValue);
+	const toDate = new Date(toValue);
+	const diffDays =
+		Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())
+			? 1
+			: Math.max(
+					1,
+					Math.ceil((toDate.getTime() - fromDate.getTime()) / 86400000) + 1,
+				);
+	return { from: fromValue, to: toValue, days: diffDays };
+};
+
+const buildDashboardParams = (query: DashboardQuery) => {
+	const interval = query.interval;
+	if (query.preset === "all") {
+		const params = new URLSearchParams();
+		params.set("interval", interval);
+		params.set("limit", "366");
+		const channelIds = query.channel_ids.filter(Boolean);
+		const tokenIds = query.token_ids.filter(Boolean);
+		if (channelIds.length > 0) {
+			params.set("channel_ids", channelIds.join(","));
+		}
+		if (tokenIds.length > 0) {
+			params.set("token_ids", tokenIds.join(","));
+		}
+		if (query.model) {
+			params.set("model", query.model);
+		}
+		return { params, range: { from: "", to: "" } };
+	}
+	const { from, to, days } = resolveDashboardRange(query);
+	const limit =
+		interval === "day"
+			? days
+			: interval === "week"
+				? Math.ceil(days / 7)
+				: Math.ceil(days / 30);
+	const params = new URLSearchParams();
+	params.set("interval", interval);
+	params.set("limit", String(limit));
+	if (from) {
+		params.set("from", `${from} 00:00:00`);
+	}
+	if (to) {
+		params.set("to", `${to} 23:59:59`);
+	}
+	const channelIds = query.channel_ids.filter(Boolean);
+	const tokenIds = query.token_ids.filter(Boolean);
+	if (channelIds.length > 0) {
+		params.set("channel_ids", channelIds.join(","));
+	}
+	if (tokenIds.length > 0) {
+		params.set("token_ids", tokenIds.join(","));
+	}
+	if (query.model) {
+		params.set("model", query.model);
+	}
+	return { params, range: { from, to } };
 };
 
 /**
@@ -128,21 +231,65 @@ const App = () => {
 	const [loading, setLoading] = useState(false);
 	const [notices, setNotices] = useState<NoticeMessage[]>([]);
 	const [data, setData] = useState<AdminData>(initialData);
+	const [dashboardQuery, setDashboardQuery] = useState<DashboardQuery>(() => {
+		if (typeof window === "undefined") {
+			return initialDashboardQuery;
+		}
+		const storedPreset = window.localStorage.getItem("dashboard:preset");
+		const storedInterval = window.localStorage.getItem("dashboard:interval");
+		const storedFrom = window.localStorage.getItem("dashboard:from") ?? "";
+		const storedTo = window.localStorage.getItem("dashboard:to") ?? "";
+		const allowedPresets: Array<DashboardQuery["preset"]> = [
+			"all",
+			"7d",
+			"30d",
+			"90d",
+			"1y",
+			"custom",
+		];
+		const preset = allowedPresets.includes(
+			storedPreset as DashboardQuery["preset"],
+		)
+			? (storedPreset as DashboardQuery["preset"])
+			: initialDashboardQuery.preset;
+		const interval =
+			storedInterval === "day" ||
+			storedInterval === "week" ||
+			storedInterval === "month"
+				? (storedInterval as DashboardQuery["interval"])
+				: initialDashboardQuery.interval;
+		if (preset === "custom") {
+			return {
+				...initialDashboardQuery,
+				preset,
+				interval,
+				from: storedFrom,
+				to: storedTo,
+			};
+		}
+		return { ...initialDashboardQuery, preset, interval, from: "", to: "" };
+	});
 	const [settingsForm, setSettingsForm] =
 		useState<SettingsForm>(initialSettingsForm);
 	const [sitePage, setSitePage] = useState(1);
-	const [sitePageSize, setSitePageSize] = useState(10);
+	const [sitePageSize, setSitePageSize] = useState(() =>
+		loadPageSizePref("pageSize:sites", 10),
+	);
 	const [siteSearch, setSiteSearch] = useState("");
 	const [siteSort, setSiteSort] = useState<SiteSortState>({
 		key: "name",
 		direction: "asc",
 	});
 	const [tokenPage, setTokenPage] = useState(1);
-	const [tokenPageSize, setTokenPageSize] = useState(10);
+	const [tokenPageSize, setTokenPageSize] = useState(() =>
+		loadPageSizePref("pageSize:tokens", 10),
+	);
 	const [editingToken, setEditingToken] = useState<Token | null>(null);
 	const [tokenForm, setTokenForm] = useState<TokenForm>(initialTokenForm);
 	const [usagePage, setUsagePage] = useState(1);
-	const [usagePageSize, setUsagePageSize] = useState(50);
+	const [usagePageSize, setUsagePageSize] = useState(() =>
+		loadPageSizePref("pageSize:usage", 50),
+	);
 	const [usageTotal, setUsageTotal] = useState(0);
 	const [usageFilters, setUsageFilters] =
 		useState<UsageQuery>(initialUsageQuery);
@@ -283,10 +430,17 @@ const App = () => {
 		[token, updateToken],
 	);
 
-	const loadDashboard = useCallback(async () => {
-		const dashboard = await apiFetch<DashboardData>("/api/dashboard");
-		setData((prev) => ({ ...prev, dashboard }));
-	}, [apiFetch]);
+	const loadDashboard = useCallback(
+		async (override?: DashboardQuery) => {
+			const query = override ?? dashboardQuery;
+			const { params } = buildDashboardParams(query);
+			const dashboard = await apiFetch<DashboardData>(
+				`/api/dashboard?${params.toString()}`,
+			);
+			setData((prev) => ({ ...prev, dashboard }));
+		},
+		[apiFetch, dashboardQuery],
+	);
 
 	const handleDashboardRefresh = useCallback(async () => {
 		const actionKey = buildActionKey("dashboard:refresh");
@@ -303,6 +457,54 @@ const App = () => {
 			endAction(actionKey);
 		}
 	}, [endAction, isActionPending, loadDashboard, pushNotice, startAction]);
+
+	const handleDashboardQueryChange = useCallback(
+		(patch: Partial<DashboardQuery>) => {
+			setDashboardQuery((prev) => {
+				const next = { ...prev, ...patch };
+				if (typeof window !== "undefined") {
+					window.localStorage.setItem("dashboard:preset", next.preset);
+					window.localStorage.setItem("dashboard:interval", next.interval);
+					if (next.preset === "custom") {
+						window.localStorage.setItem("dashboard:from", next.from);
+						window.localStorage.setItem("dashboard:to", next.to);
+					} else {
+						window.localStorage.removeItem("dashboard:from");
+						window.localStorage.removeItem("dashboard:to");
+					}
+				}
+				return next;
+			});
+		},
+		[],
+	);
+
+	const handleDashboardApply = useCallback(
+		async (override?: DashboardQuery) => {
+		const actionKey = buildActionKey("dashboard:filter");
+		if (isActionPending(actionKey)) {
+			return;
+		}
+		const nextQuery = override ?? dashboardQuery;
+		startAction(actionKey);
+		try {
+			await loadDashboard(nextQuery);
+			pushNotice("success", "筛选已更新");
+		} catch (error) {
+			pushNotice("error", (error as Error).message);
+		} finally {
+			endAction(actionKey);
+		}
+	},
+	[
+		dashboardQuery,
+		endAction,
+		isActionPending,
+		loadDashboard,
+		pushNotice,
+		startAction,
+	],
+	);
 
 	const loadSites = useCallback(async () => {
 		const result = await apiFetch<{
@@ -342,21 +544,29 @@ const App = () => {
 			const offset = Math.max(0, (page - 1) * pageSize);
 			params.set("limit", String(pageSize));
 			params.set("offset", String(offset));
-			const channel = query.channel.trim();
-			const token = query.token.trim();
-			const model = query.model.trim();
-			const status = query.status.trim();
-			if (channel) {
-				params.set("channel", channel);
+			const channelIds = query.channel_ids.filter(Boolean);
+			const tokenIds = query.token_ids.filter(Boolean);
+			const models = query.models.filter(Boolean);
+			const statuses = query.statuses.filter(Boolean);
+			const from = query.from.trim();
+			const to = query.to.trim();
+			if (from) {
+				params.set("from", `${from} 00:00:00`);
 			}
-			if (token) {
-				params.set("token", token);
+			if (to) {
+				params.set("to", `${to} 23:59:59`);
 			}
-			if (model) {
-				params.set("model", model);
+			if (channelIds.length > 0) {
+				params.set("channel_ids", channelIds.join(","));
 			}
-			if (status) {
-				params.set("status", status);
+			if (tokenIds.length > 0) {
+				params.set("token_ids", tokenIds.join(","));
+			}
+			if (models.length > 0) {
+				params.set("models", models.join(","));
+			}
+			if (statuses.length > 0) {
+				params.set("statuses", statuses.join(","));
 			}
 			const result = await apiFetch<UsageResponse>(
 				`/api/usage?${params.toString()}`,
@@ -378,7 +588,7 @@ const App = () => {
 			dismissNotice();
 			try {
 				if (tabId === "dashboard") {
-					await loadDashboard();
+					await Promise.all([loadDashboard(), loadSites(), loadTokens()]);
 				}
 				if (tabId === "channels") {
 					await loadSites();
@@ -390,7 +600,12 @@ const App = () => {
 					await Promise.all([loadTokens(), loadSites()]);
 				}
 				if (tabId === "usage") {
-					await loadUsage();
+					await Promise.all([
+						loadUsage(),
+						loadSites(),
+						loadTokens(),
+						loadModels(),
+					]);
 				}
 				if (tabId === "settings") {
 					await loadSettings();
@@ -518,6 +733,7 @@ const App = () => {
 	}, []);
 
 	const handleSitePageSizeChange = useCallback((next: number) => {
+		persistPageSizePref("pageSize:sites", next);
 		setSitePageSize(next);
 		setSitePage(1);
 	}, []);
@@ -535,6 +751,7 @@ const App = () => {
 	}, []);
 
 	const handleTokenPageSizeChange = useCallback((next: number) => {
+		persistPageSizePref("pageSize:tokens", next);
 		setTokenPageSize(next);
 		setTokenPage(1);
 	}, []);
@@ -568,6 +785,7 @@ const App = () => {
 				return;
 			}
 			startAction(actionKey);
+			persistPageSizePref("pageSize:usage", next);
 			setUsagePageSize(next);
 			setUsagePage(1);
 			try {
@@ -591,10 +809,12 @@ const App = () => {
 			return;
 		}
 		const nextQuery = {
-			channel: usageFilters.channel.trim(),
-			token: usageFilters.token.trim(),
-			model: usageFilters.model.trim(),
-			status: usageFilters.status.trim(),
+			channel_ids: usageFilters.channel_ids.filter(Boolean),
+			token_ids: usageFilters.token_ids.filter(Boolean),
+			models: usageFilters.models.filter(Boolean),
+			statuses: usageFilters.statuses.filter((value) => /^\d+$/.test(value)),
+			from: usageFilters.from.trim(),
+			to: usageFilters.to.trim(),
 		};
 		startAction(actionKey);
 		setUsageQuery(nextQuery);
@@ -613,10 +833,12 @@ const App = () => {
 		loadUsage,
 		pushNotice,
 		startAction,
-		usageFilters.channel,
-		usageFilters.model,
-		usageFilters.status,
-		usageFilters.token,
+		usageFilters.channel_ids,
+		usageFilters.from,
+		usageFilters.models,
+		usageFilters.statuses,
+		usageFilters.token_ids,
+		usageFilters.to,
 	]);
 
 	const handleUsageClear = useCallback(async () => {
@@ -1244,6 +1466,44 @@ const App = () => {
 		[endAction, isActionPending, loadTokens, pushNotice, startAction, apiFetch],
 	);
 
+	const handleCheckinRunSite = useCallback(
+		async (site: Site) => {
+			const actionKey = buildActionKey("site:checkin", site.id);
+			if (isActionPending(actionKey)) {
+				return;
+			}
+			startAction(actionKey);
+			try {
+				const result = await apiFetch<{
+					result: {
+						id: string;
+						name: string;
+						status: "success" | "failed" | "skipped";
+						message: string;
+						checkin_date?: string | null;
+					};
+					runs_at: string;
+				}>(`/api/sites/${site.id}/checkin`, { method: "POST" });
+				await loadSites();
+				const tone =
+					result.result.status === "failed"
+						? "warning"
+						: result.result.status === "skipped"
+							? "info"
+							: "success";
+				pushNotice(
+					tone,
+					`${site.name || "站点"}：${result.result.message || "签到完成"}`,
+				);
+			} catch (error) {
+				pushNotice("error", (error as Error).message);
+			} finally {
+				endAction(actionKey);
+			}
+		},
+		[endAction, isActionPending, loadSites, pushNotice, startAction, apiFetch],
+	);
+
 	const handleCheckinRunAll = useCallback(async () => {
 		const actionKey = buildActionKey("site:checkinAll");
 		if (isActionPending(actionKey)) {
@@ -1376,7 +1636,15 @@ const App = () => {
 			return (
 				<DashboardView
 					dashboard={data.dashboard}
-					isRefreshing={isActionPending(buildActionKey("dashboard:refresh"))}
+					isRefreshing={
+						isActionPending(buildActionKey("dashboard:refresh")) ||
+						isActionPending(buildActionKey("dashboard:filter"))
+					}
+					query={dashboardQuery}
+					channels={data.sites}
+					tokens={data.tokens}
+					onQueryChange={handleDashboardQueryChange}
+					onApply={handleDashboardApply}
 					onRefresh={handleDashboardRefresh}
 				/>
 			);
@@ -1402,6 +1670,7 @@ const App = () => {
 					onEdit={startSiteEdit}
 					onSubmit={handleSiteSubmit}
 					onTest={handleSiteTest}
+					onCheckin={handleCheckinRunSite}
 					onToggle={handleSiteToggle}
 					onDelete={requestSiteDelete}
 					onPageChange={handleSitePageChange}
@@ -1455,6 +1724,9 @@ const App = () => {
 						isActionPending(buildActionKey("usage:refresh")) ||
 						isActionPending(buildActionKey("usage:load"))
 					}
+					sites={data.sites}
+					tokens={data.tokens}
+					models={data.models}
 					onRefresh={handleUsageRefresh}
 					onPageChange={handleUsagePageChange}
 					onPageSizeChange={handleUsagePageSizeChange}
@@ -1503,63 +1775,41 @@ const App = () => {
 				/>
 			)}
 			{confirmState && (
-				<div class="fixed inset-0 z-50">
-					<button
-						aria-label="关闭弹窗"
-						class="absolute inset-0 bg-slate-950/60"
-						type="button"
-						onClick={closeConfirm}
-					/>
-					<div class="relative z-10 flex min-h-screen items-center justify-center px-4 py-8">
-						<div
-							aria-labelledby="confirm-title"
-							aria-modal="true"
-							class="app-card w-full max-w-md p-6"
-							role="dialog"
-						>
-							<div class="flex items-start justify-between gap-4">
-								<div>
-									<h3 class="app-title text-lg" id="confirm-title">
-										{confirmState.title}
-									</h3>
-									<p class="mt-2 text-sm text-[color:var(--app-ink-muted)]">
-										{confirmState.message}
-									</p>
-								</div>
-								<button
-									class="app-button app-focus"
-									type="button"
-									onClick={closeConfirm}
-								>
-									关闭
-								</button>
+				<Dialog open={Boolean(confirmState)} onClose={closeConfirm}>
+					<DialogContent
+						aria-labelledby="confirm-title"
+						aria-modal="true"
+						class="max-w-md"
+					>
+						<DialogHeader>
+							<div>
+								<DialogTitle id="confirm-title">
+									{confirmState.title}
+								</DialogTitle>
+								<DialogDescription>{confirmState.message}</DialogDescription>
 							</div>
-							<div class="mt-6 flex flex-wrap items-center justify-end gap-2">
-								<button
-									class="app-button app-focus"
-									type="button"
-									onClick={closeConfirm}
-								>
-									取消
-								</button>
-								<button
-									class={`app-button app-focus ${
-										confirmState.tone === "error"
-											? "app-button-danger"
-											: "app-button-primary"
-									}`}
-									type="button"
-									disabled={confirmPending}
-									onClick={handleConfirm}
-								>
-									{confirmPending
-										? "处理中..."
-										: (confirmState.confirmLabel ?? "确认")}
-								</button>
-							</div>
-						</div>
-					</div>
-				</div>
+							<Button size="sm" type="button" onClick={closeConfirm}>
+								关闭
+							</Button>
+						</DialogHeader>
+						<DialogFooter>
+							<Button size="sm" type="button" onClick={closeConfirm}>
+								取消
+							</Button>
+							<Button
+								size="sm"
+								variant={confirmState.tone === "error" ? "danger" : "primary"}
+								type="button"
+								disabled={confirmPending}
+								onClick={handleConfirm}
+							>
+								{confirmPending
+									? "处理中..."
+									: (confirmState.confirmLabel ?? "确认")}
+							</Button>
+						</DialogFooter>
+					</DialogContent>
+				</Dialog>
 			)}
 		</div>
 	);

@@ -1,3 +1,4 @@
+import { Button, Card, Input } from "../components/ui";
 import type { RuntimeProxyConfig, SettingsForm } from "../core/types";
 
 type SettingsViewProps = {
@@ -60,20 +61,20 @@ export const SettingsView = ({
 	];
 
 	return (
-		<div class="app-card animate-fade-up p-5">
-			<div class="mb-4 flex items-center justify-between">
+		<div class="animate-fade-up space-y-4">
+			<div class="flex items-center justify-between">
 				<h3 class="app-title text-lg">系统设置</h3>
 			</div>
-			<form class="grid gap-3.5 lg:grid-cols-2" onSubmit={onSubmit}>
-				<div>
-					<label
-						class="mb-1.5 block text-xs uppercase tracking-widest text-[color:var(--app-ink-muted)]"
+			<Card class="p-5">
+				<form class="grid gap-3.5 lg:grid-cols-2" onSubmit={onSubmit}>
+					<div>
+						<label
+							class="mb-1.5 block text-xs uppercase tracking-widest text-[color:var(--app-ink-muted)]"
 						for="retention"
 					>
 						日志保留天数
 					</label>
-					<input
-						class="app-input app-focus"
+					<Input
 						id="retention"
 						name="log_retention_days"
 						type="number"
@@ -94,8 +95,7 @@ export const SettingsView = ({
 					>
 						会话时长（小时）
 					</label>
-					<input
-						class="app-input app-focus"
+					<Input
 						id="session-ttl"
 						name="session_ttl_hours"
 						type="number"
@@ -116,8 +116,7 @@ export const SettingsView = ({
 					>
 						签到时间（中国时间）
 					</label>
-					<input
-						class="app-input app-focus"
+					<Input
 						id="checkin-schedule-time"
 						name="checkin_schedule_time"
 						type="time"
@@ -137,8 +136,7 @@ export const SettingsView = ({
 					>
 						失败冷却（分钟）
 					</label>
-					<input
-						class="app-input app-focus"
+					<Input
 						id="failure-cooldown"
 						name="model_failure_cooldown_minutes"
 						type="number"
@@ -162,8 +160,7 @@ export const SettingsView = ({
 					>
 						管理员密码
 					</label>
-					<input
-						class="app-input app-focus"
+					<Input
 						id="admin-password"
 						name="admin_password"
 						type="password"
@@ -185,16 +182,13 @@ export const SettingsView = ({
 					</p>
 				</div>
 				<div class="flex items-end lg:col-span-2">
-					<button
-						class="app-button app-button-primary app-focus h-11 px-4 text-sm"
-						type="submit"
-						disabled={isSaving}
-					>
+					<Button variant="primary" size="lg" type="submit" disabled={isSaving}>
 						{isSaving ? "保存中..." : "保存设置"}
-					</button>
+					</Button>
 				</div>
-			</form>
-			<div class="mt-6 border-t border-white/70 pt-5">
+				</form>
+			</Card>
+			<Card class="p-5">
 				<h4 class="app-title text-base">运行时配置（只读）</h4>
 				<p class="mt-2 text-xs text-[color:var(--app-ink-muted)]">
 					需要调整请在 Cloudflare Dashboard 或部署环境中修改以下环境变量，
@@ -202,7 +196,7 @@ export const SettingsView = ({
 				</p>
 				<div class="mt-3 grid gap-2 sm:grid-cols-2">
 					{runtimeItems.map((item) => (
-						<div class="rounded-xl bg-white/70 px-3 py-3 text-sm">
+						<div class="rounded-xl border border-white/60 bg-white/70 px-3 py-3 text-sm">
 							<div class="text-sm font-semibold text-[color:var(--app-ink)]">
 								{item.label}
 							</div>
@@ -215,7 +209,7 @@ export const SettingsView = ({
 						</div>
 					))}
 				</div>
-			</div>
+			</Card>
 		</div>
 	);
 };

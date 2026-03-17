@@ -36,6 +36,67 @@ usage.get("/", async (c) => {
 		filters.push("usage_logs.token_id = ?");
 		params.push(query.token_id);
 	}
+	if (query.channel_ids) {
+		const channelIds = String(query.channel_ids)
+			.split(",")
+			.map((item) => item.trim())
+			.filter(Boolean);
+		if (channelIds.length > 0) {
+			const placeholders = channelIds.map(() => "?").join(", ");
+			filters.push(`usage_logs.channel_id IN (${placeholders})`);
+			params.push(...channelIds);
+		}
+	}
+	if (query.token_ids) {
+		const tokenIds = String(query.token_ids)
+			.split(",")
+			.map((item) => item.trim())
+			.filter(Boolean);
+		if (tokenIds.length > 0) {
+			const placeholders = tokenIds.map(() => "?").join(", ");
+			filters.push(`usage_logs.token_id IN (${placeholders})`);
+			params.push(...tokenIds);
+		}
+	}
+	if (query.models) {
+		const models = String(query.models)
+			.split(",")
+			.map((item) => item.trim())
+			.filter(Boolean);
+		if (models.length > 0) {
+			const placeholders = models.map(() => "?").join(", ");
+			filters.push(`usage_logs.model IN (${placeholders})`);
+			params.push(...models);
+		}
+	}
+	if (query.statuses) {
+		const statuses = String(query.statuses)
+			.split(",")
+			.map((item) => item.trim())
+			.filter(Boolean);
+		if (statuses.length > 0) {
+			const numericStatuses = statuses
+				.map((item) => Number(item))
+				.filter((value) => !Number.isNaN(value));
+			const textStatuses = statuses.filter((item) =>
+				Number.isNaN(Number(item)),
+			);
+			const statusFilters: string[] = [];
+			if (numericStatuses.length > 0) {
+				const placeholders = numericStatuses.map(() => "?").join(", ");
+				statusFilters.push(`usage_logs.upstream_status IN (${placeholders})`);
+				params.push(...numericStatuses);
+			}
+			if (textStatuses.length > 0) {
+				const placeholders = textStatuses.map(() => "?").join(", ");
+				statusFilters.push(`usage_logs.status IN (${placeholders})`);
+				params.push(...textStatuses);
+			}
+			if (statusFilters.length > 0) {
+				filters.push(`(${statusFilters.join(" OR ")})`);
+			}
+		}
+	}
 	if (query.channel) {
 		const channel = String(query.channel).trim();
 		if (channel) {
