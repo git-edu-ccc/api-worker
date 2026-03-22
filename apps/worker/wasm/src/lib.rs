@@ -1358,6 +1358,10 @@ fn is_openai_responses_target(target: &str) -> bool {
     target.to_ascii_lowercase().contains("/responses")
 }
 
+fn is_openai_chat_completions_target(target: &str) -> bool {
+    target.to_ascii_lowercase().contains("/chat/completions")
+}
+
 fn tool_args_to_string(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(s)) => s.to_string(),
@@ -1424,9 +1428,22 @@ fn build_upstream_chat_request_value(
     }
 
     if provider == "openai" {
-        let (absolute_url, override_path) =
+        let (override_absolute, override_path) =
             resolve_override(endpoint_overrides_obj.get("chat_url"), model);
-        let path = override_path.unwrap_or_else(|| "/v1/chat/completions".to_string());
+        let mut absolute_url: Option<String> = None;
+        let mut path = "/v1/chat/completions".to_string();
+        if let Some(candidate_absolute) = override_absolute {
+            if is_openai_chat_completions_target(&candidate_absolute) {
+                absolute_url = Some(candidate_absolute);
+            }
+        }
+        if absolute_url.is_none() {
+            if let Some(candidate_path) = override_path {
+                if is_openai_chat_completions_target(&candidate_path) {
+                    path = candidate_path;
+                }
+            }
+        }
         let mut body = Map::new();
         body.insert(
             "model".to_string(),
