@@ -1704,6 +1704,20 @@ function resolveChannelBaseUrl(channel: ChannelRecord): string {
 	return normalizeBaseUrl(channel.base_url);
 }
 
+function normalizeIncomingRequestPath(path: string): {
+	path: string;
+	rewritten: boolean;
+} {
+	if (!path) {
+		return { path, rewritten: false };
+	}
+	const normalized = path.replace(/^\/v1(?:\/v1)+(\/|$)/i, "/v1$1");
+	return {
+		path: normalized,
+		rewritten: normalized !== path,
+	};
+}
+
 function mergeQuery(
 	base: string,
 	querySuffix: string,
@@ -1790,12 +1804,15 @@ proxy.all("/*", tokenAuth, async (c) => {
 		getCacheConfig(db, c.env.CACHE_VERSION_STORE),
 		getProxyRuntimeSettings(db),
 	]);
+	const rawRequestPath = c.req.path;
+	const normalizedRequestPath = normalizeIncomingRequestPath(rawRequestPath);
+	const requestPath = normalizedRequestPath.path;
 	const requestText = await c.req.text();
 	let parsedBody = requestText
 		? safeJsonParse<Record<string, unknown> | null>(requestText, null)
 		: null;
-	const downstreamProvider = detectDownstreamProvider(c.req.path);
-	const endpointType = detectEndpointType(downstreamProvider, c.req.path);
+	const downstreamProvider = detectDownstreamProvider(requestPath);
+	const endpointType = detectEndpointType(downstreamProvider, requestPath);
 	const toolCallChainRepair =
 		downstreamProvider === "openai"
 			? repairOpenAiToolCallChain(parsedBody, endpointType)
@@ -1805,12 +1822,12 @@ proxy.all("/*", tokenAuth, async (c) => {
 		: requestText;
 	const downstreamModel = parseDownstreamModel(
 		downstreamProvider,
-		c.req.path,
+		requestPath,
 		parsedBody,
 	);
 	const isStream = parseDownstreamStream(
 		downstreamProvider,
-		c.req.path,
+		requestPath,
 		parsedBody,
 	);
 	const responsesRequestHints =
@@ -1832,7 +1849,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 			level,
 			code,
 			message,
-			requestPath: c.req.path,
+			requestPath,
 			method: c.req.method,
 			channelId,
 			tokenId: tokenRecord.id,
@@ -1842,12 +1859,23 @@ proxy.all("/*", tokenAuth, async (c) => {
 		scheduleDbWrite(c, task);
 	};
 	const scheduleUsageEvent = createUsageEventScheduler(c, runtimeSettings, {
-		requestPath: c.req.path,
+		requestPath,
 		method: c.req.method,
 		tokenId: tokenRecord.id,
 		model: downstreamModel,
 		requestSeed: String(requestStart),
 	});
+	if (normalizedRequestPath.rewritten) {
+		scheduleRuntimeEvent(
+			"info",
+			"proxy_request_path_normalized",
+			"proxy_request_path_normalized",
+			{
+				raw_path: rawRequestPath,
+				normalized_path: requestPath,
+			},
+		);
+	}
 	if (
 		toolCallChainRepair.patchedAssistantCalls > 0 ||
 		toolCallChainRepair.droppedToolMessages > 0 ||
@@ -1913,7 +1941,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 				tokenId: tokenRecord.id,
 				channelId: null,
 				model: downstreamModel,
-				requestPath: c.req.path,
+				requestPath,
 				totalTokens: 0,
 				latencyMs,
 				firstTokenLatencyMs: isStream ? null : latencyMs,
@@ -2270,7 +2298,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 					"proxy_model_cooldown",
 					"proxy_model_cooldown",
 					{
-						path: c.req.path,
+						path: requestPath,
 						model: downstreamModel,
 						cooldown_minutes: cooldownMinutes,
 						cooldown_threshold: cooldownFailureThreshold,
@@ -2293,7 +2321,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 			"proxy_no_compatible_channels",
 			"proxy_no_compatible_channels",
 			{
-				path: c.req.path,
+				path: requestPath,
 				model: downstreamModel,
 				downstream_provider: downstreamProvider,
 				allowed_channels: allowedChannels.length,
@@ -2308,7 +2336,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 		});
 		return jsonErrorWithTrace(503, "no_available_channels", "no_available_channels");
 	}
-	const targetPath = c.req.path;
+	const targetPath = requestPath;
 	const querySuffix = c.req.url.includes("?")
 		? `?${c.req.url.split("?")[1]}`
 		: "";
