@@ -675,9 +675,6 @@ const App = () => {
 		}
 		const runtimeSettings =
 			data.settings.runtime_settings ?? data.settings.runtime_config;
-		const usageQueueDirectPercent = Math.round(
-			(runtimeSettings?.usage_queue_direct_write_ratio ?? 0.4) * 100,
-		);
 		setSettingsForm({
 			log_retention_days: String(data.settings.log_retention_days ?? 30),
 			session_ttl_hours: String(data.settings.session_ttl_hours ?? 12),
@@ -711,11 +708,6 @@ const App = () => {
 			proxy_stream_options_capability_ttl_seconds: String(
 				runtimeSettings?.stream_options_capability_ttl_seconds ?? 604800,
 			),
-			proxy_usage_queue_enabled: runtimeSettings?.usage_queue_enabled ?? true,
-			usage_queue_daily_limit: String(
-				runtimeSettings?.usage_queue_daily_limit ?? 10000,
-			),
-			usage_queue_direct_write_ratio: String(usageQueueDirectPercent),
 			proxy_attempt_worker_fallback_enabled:
 				runtimeSettings?.attempt_worker_fallback_enabled ?? true,
 			proxy_attempt_worker_fallback_threshold: String(
@@ -2067,7 +2059,6 @@ const App = () => {
 					settingsForm={settingsForm}
 					adminPasswordSet={data.settings?.admin_password_set ?? false}
 					runtimeConfig={data.settings?.runtime_config ?? null}
-					usageQueueStatus={data.settings?.usage_queue_status ?? null}
 					isSaving={isActionPending(buildActionKey("settings:submit"))}
 					onSubmit={handleSettingsSubmit}
 					onFormChange={handleSettingsFormChange}

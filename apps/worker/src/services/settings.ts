@@ -34,9 +34,6 @@ const DEFAULT_CACHE_SETTINGS_TTL_SECONDS = 30;
 const DEFAULT_PROXY_UPSTREAM_TIMEOUT_MS = 180000;
 const DEFAULT_PROXY_RETRY_MAX_RETRIES = 5;
 const DEFAULT_PROXY_ZERO_COMPLETION_AS_ERROR_ENABLED = true;
-const DEFAULT_PROXY_USAGE_QUEUE_ENABLED = true;
-const DEFAULT_USAGE_QUEUE_DAILY_LIMIT = 10000;
-const DEFAULT_USAGE_QUEUE_DIRECT_WRITE_RATIO = 0.4;
 const DEFAULT_PROXY_ATTEMPT_WORKER_FALLBACK_ENABLED = true;
 const DEFAULT_PROXY_ATTEMPT_WORKER_FALLBACK_THRESHOLD = 3;
 const DEFAULT_PROXY_LARGE_REQUEST_OFFLOAD_THRESHOLD_BYTES = 32768;
@@ -77,9 +74,6 @@ const PROXY_STREAM_USAGE_PARSE_TIMEOUT_KEY =
 const PROXY_RESPONSES_AFFINITY_TTL_KEY = "proxy_responses_affinity_ttl_seconds";
 const PROXY_STREAM_OPTIONS_CAPABILITY_TTL_KEY =
 	"proxy_stream_options_capability_ttl_seconds";
-const PROXY_USAGE_QUEUE_ENABLED_KEY = "proxy_usage_queue_enabled";
-const USAGE_QUEUE_DAILY_LIMIT_KEY = "usage_queue_daily_limit";
-const USAGE_QUEUE_DIRECT_WRITE_RATIO_KEY = "usage_queue_direct_write_ratio";
 const PROXY_ATTEMPT_WORKER_FALLBACK_ENABLED_KEY =
 	"proxy_attempt_worker_fallback_enabled";
 const PROXY_ATTEMPT_WORKER_FALLBACK_THRESHOLD_KEY =
@@ -98,9 +92,6 @@ export type RuntimeProxyConfig = {
 	stream_usage_mode: string;
 	stream_usage_max_bytes: number;
 	stream_usage_max_parsers: number;
-	usage_queue_enabled: boolean;
-	usage_queue_daily_limit: number;
-	usage_queue_direct_write_ratio: number;
 	attempt_worker_fallback_enabled: boolean;
 	attempt_worker_fallback_threshold: number;
 	large_request_offload_threshold_bytes: number;
@@ -108,8 +99,6 @@ export type RuntimeProxyConfig = {
 	attempt_log_retention_days: number;
 	attempt_worker_bound: boolean;
 	attempt_worker_fallback_active: boolean;
-	usage_queue_bound: boolean;
-	usage_queue_active: boolean;
 };
 
 export type ProxyRuntimeSettings = {
@@ -124,9 +113,6 @@ export type ProxyRuntimeSettings = {
 	stream_usage_parse_timeout_ms: number;
 	responses_affinity_ttl_seconds: number;
 	stream_options_capability_ttl_seconds: number;
-	usage_queue_enabled: boolean;
-	usage_queue_daily_limit: number;
-	usage_queue_direct_write_ratio: number;
 	attempt_worker_fallback_enabled: boolean;
 	attempt_worker_fallback_threshold: number;
 	large_request_offload_threshold_bytes: number;
@@ -272,17 +258,6 @@ function parseBooleanSetting(value: string | null, fallback: boolean): boolean {
 	}
 	if (["0", "false", "no", "off"].includes(normalized)) {
 		return false;
-	}
-	return fallback;
-}
-
-function parseRatioSetting(value: string | null, fallback: number): number {
-	if (!value) {
-		return fallback;
-	}
-	const parsed = Number(value);
-	if (!Number.isNaN(parsed) && Number.isFinite(parsed)) {
-		return Math.min(1, Math.max(0, parsed));
 	}
 	return fallback;
 }
@@ -452,9 +427,6 @@ export async function getProxyRuntimeSettings(
 		settings[PROXY_STREAM_OPTIONS_CAPABILITY_TTL_KEY] ?? null,
 		DEFAULT_PROXY_STREAM_OPTIONS_CAPABILITY_TTL_SECONDS,
 	);
-	const usageQueueEnabled = false;
-	const usageQueueDailyLimit = 0;
-	const usageQueueDirectWriteRatio = 1;
 	const attemptWorkerFallbackEnabled = parseBooleanSetting(
 		settings[PROXY_ATTEMPT_WORKER_FALLBACK_ENABLED_KEY] ?? null,
 		DEFAULT_PROXY_ATTEMPT_WORKER_FALLBACK_ENABLED,
@@ -487,9 +459,6 @@ export async function getProxyRuntimeSettings(
 		stream_usage_parse_timeout_ms: streamUsageParseTimeout,
 		responses_affinity_ttl_seconds: responsesAffinityTtlSeconds,
 		stream_options_capability_ttl_seconds: streamOptionsCapabilityTtlSeconds,
-		usage_queue_enabled: usageQueueEnabled,
-		usage_queue_daily_limit: usageQueueDailyLimit,
-		usage_queue_direct_write_ratio: usageQueueDirectWriteRatio,
 		attempt_worker_fallback_enabled: attemptWorkerFallbackEnabled,
 		attempt_worker_fallback_threshold: attemptWorkerFallbackThreshold,
 		large_request_offload_threshold_bytes: largeRequestOffloadThresholdBytes,
@@ -514,8 +483,6 @@ export function getRuntimeProxyConfig(
 		attempt_worker_bound: attemptWorkerBound,
 		attempt_worker_fallback_active:
 			attemptWorkerBound && settings.attempt_worker_fallback_enabled,
-		usage_queue_bound: false,
-		usage_queue_active: false,
 	};
 }
 

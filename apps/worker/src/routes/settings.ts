@@ -22,27 +22,6 @@ import { jsonError } from "../utils/http";
 
 const settings = new Hono<AppEnv>();
 
-type UsageQueueStatusView = {
-	count: number | null;
-	date: string | null;
-	limit: number;
-	enabled: boolean;
-	bound: boolean;
-	active: boolean;
-	reserved_count: number | null;
-	enqueue_success_count: number | null;
-	direct_count: number | null;
-	fallback_direct_count: number | null;
-	reserve_failed_count: number | null;
-	reserve_over_limit_count: number | null;
-	queue_send_failed_count: number | null;
-	target_queue_ratio: number;
-	target_direct_ratio: number;
-	effective_queue_ratio: number | null;
-	effective_direct_ratio: number | null;
-	effective_total_count: number | null;
-};
-
 /**
  * Returns settings values.
  */
@@ -55,29 +34,6 @@ settings.get("/", async (c) => {
 	const runtimeSettings = await getProxyRuntimeSettings(db);
 	const runtimeConfig = getRuntimeProxyConfig(c.env, runtimeSettings);
 
-	const emptyUsageQueueStatus: UsageQueueStatusView = {
-		count: null,
-		date: null,
-		limit: 0,
-		enabled: false,
-		bound: false,
-		active: false,
-		reserved_count: null,
-		enqueue_success_count: null,
-		direct_count: null,
-		fallback_direct_count: null,
-		reserve_failed_count: null,
-		reserve_over_limit_count: null,
-		queue_send_failed_count: null,
-		target_queue_ratio: 0,
-		target_direct_ratio: 1,
-		effective_queue_ratio: null,
-		effective_direct_ratio: null,
-		effective_total_count: null,
-	};
-
-	const usageQueueStatus: UsageQueueStatusView = emptyUsageQueueStatus;
-
 	return c.json({
 		log_retention_days: retention,
 		session_ttl_hours: sessionTtlHours,
@@ -89,7 +45,6 @@ settings.get("/", async (c) => {
 			runtimeSettings.model_failure_cooldown_threshold,
 		runtime_config: runtimeConfig,
 		runtime_settings: runtimeSettings,
-		usage_queue_status: usageQueueStatus,
 	});
 });
 

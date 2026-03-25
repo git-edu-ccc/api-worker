@@ -2,7 +2,6 @@
 import type {
   RuntimeProxyConfig,
   SettingsForm,
-  UsageQueueStatus,
 } from "../core/types";
 
 type SettingsViewProps = {
@@ -10,7 +9,6 @@ type SettingsViewProps = {
   adminPasswordSet: boolean;
   isSaving: boolean;
   runtimeConfig?: RuntimeProxyConfig | null;
-  usageQueueStatus?: UsageQueueStatus | null;
   onSubmit: (event: Event) => void;
   onFormChange: (patch: Partial<SettingsForm>) => void;
 };
@@ -35,60 +33,9 @@ export const SettingsView = ({
   adminPasswordSet,
   isSaving,
   runtimeConfig,
-  usageQueueStatus,
   onSubmit,
   onFormChange,
 }: SettingsViewProps) => {
-  const queueBoundValue =
-    runtimeConfig === null || runtimeConfig === undefined
-      ? "-"
-      : runtimeConfig.usage_queue_bound
-        ? "已绑定"
-        : "未绑定";
-  const queueActiveValue =
-    runtimeConfig === null || runtimeConfig === undefined
-      ? "-"
-      : runtimeConfig.usage_queue_active
-        ? "是"
-        : "否";
-  const formatRatio = (value: number | null | undefined): string => {
-    if (typeof value !== "number" || Number.isNaN(value)) {
-      return "-";
-    }
-    return `${(value * 100).toFixed(1)}%`;
-  };
-  const queueReservedValue = usageQueueStatus
-    ? usageQueueStatus.count === null
-      ? "未绑定"
-      : usageQueueStatus.limit > 0
-        ? `${usageQueueStatus.count} / ${usageQueueStatus.limit}`
-        : String(usageQueueStatus.count)
-    : "-";
-  const queueEnqueueSuccessValue = usageQueueStatus
-    ? usageQueueStatus.enqueue_success_count === null
-      ? "未绑定"
-      : String(usageQueueStatus.enqueue_success_count)
-    : "-";
-  const queueDirectValue = usageQueueStatus
-    ? usageQueueStatus.direct_count === null
-      ? "未绑定"
-      : String(usageQueueStatus.direct_count)
-    : "-";
-  const queueFallbackDirectValue = usageQueueStatus
-    ? usageQueueStatus.fallback_direct_count === null
-      ? "未绑定"
-      : String(usageQueueStatus.fallback_direct_count)
-    : "-";
-  const queueRatioValue = usageQueueStatus
-    ? `${formatRatio(usageQueueStatus.effective_queue_ratio)} / ${formatRatio(
-        usageQueueStatus.target_queue_ratio,
-      )}`
-    : "-";
-  const directRatioValue = usageQueueStatus
-    ? `${formatRatio(usageQueueStatus.effective_direct_ratio)} / ${formatRatio(
-        usageQueueStatus.target_direct_ratio,
-      )}`
-    : "-";
   const attemptWorkerBoundValue =
     runtimeConfig === null || runtimeConfig === undefined
       ? "-"

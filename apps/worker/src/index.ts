@@ -140,4 +140,3 @@ export default {
 
 export { CacheVersionStore } from "./services/cache-version-store";
 export { CheckinScheduler } from "./services/checkin-scheduler";
-export { UsageLimiter } from "./services/usage-limiter";

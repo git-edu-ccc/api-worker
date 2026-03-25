@@ -24,7 +24,7 @@ Cloudflare Workers + D1 的 API 网关与管理台一体化项目。
 说明：
 
 - 创建 `CLOUDFLARE_API_TOKEN` 时，建议使用 **Account Token**，资源范围限制到目标账号（`CLOUDFLARE_ACCOUNT_ID` 对应账号）。
-- 建议最小权限（Edit）：`Workers Scripts`、`D1`、`Queues`。
+- 建议最小权限（Edit）：`Workers Scripts`、`D1`。
 - 可选权限：`Workers Routes`（仅需要管理路由时）、`Workers Tail`（仅需要日志 tail 调试时）、`Workers Observability`（仅需要通过 Observability 能力查询/分析日志与追踪时）。
 
 ### GitHub Actions 自动部署
@@ -71,7 +71,6 @@ bun run deploy:update
 - Runtime: Cloudflare Workers
 - API Framework: Hono
 - Database: Cloudflare D1（SQLite）
-- Queue / Async: Cloudflare Queues
 - Stateful: Durable Objects
 - WASM: Rust + wasm-bindgen（`apps/worker/wasm`）
 - Frontend: Vite + TypeScript
@@ -155,8 +154,7 @@ bun run check
 - D1: `DB`
 - KV（热点只读数据）: `KV_HOT`
 - Static Assets: `ASSETS`（目录 `../ui/dist`）
-- Queue: `USAGE_QUEUE`（`usage-events`）
-- Durable Objects: `CHECKIN_SCHEDULER`, `USAGE_LIMITER`
+- Durable Objects: `CHECKIN_SCHEDULER`, `CACHE_VERSION_STORE`
 - Service Binding: `ATTEMPT_WORKER`（绑定到 `attempt-worker`）
 - 可选环境绑定：`CORS_ORIGIN`（用于限制管理台跨域来源）
 

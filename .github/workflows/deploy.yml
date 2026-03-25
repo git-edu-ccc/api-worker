@@ -262,30 +262,6 @@ jobs:
         if: steps.check-db.outputs.db_exists != 'true'
         run: bunx wrangler telemetry disable
 
-      - name: Detach legacy queue consumer (best effort)
-        if: steps.check-db.outputs.db_exists != 'true'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          echo "移除遗留 Queue Consumer（usage-events -> api-worker）..."
-          REMOVE_OUTPUT=""
-          REMOVE_STATUS=0
-          set +e
-          REMOVE_OUTPUT=$(bunx wrangler queues consumer remove usage-events api-worker --config apps/worker/wrangler.toml 2>&1)
-          REMOVE_STATUS=$?
-          set -e
-          if [ $REMOVE_STATUS -eq 0 ]; then
-            echo "✅ 已移除遗留 Queue Consumer"
-          else
-            if echo "$REMOVE_OUTPUT" | grep -Eqi "not found|does not exist|code: 10007|code: 11009|No queue consumers"; then
-              echo "ℹ️ 未发现遗留 Queue Consumer，跳过"
-            else
-              echo "⚠️ 移除 Queue Consumer 失败，继续部署（输出如下）:"
-              echo "$REMOVE_OUTPUT"
-            fi
-          fi
-
       - name: Create D1 database (init only)
         if: steps.check-db.outputs.db_exists != 'true'
         env:
@@ -438,30 +414,6 @@ jobs:
 
       - name: Disable wrangler telemetry
         run: bunx wrangler telemetry disable
-
-      - name: Detach legacy queue consumer (best effort)
-        if: needs.check-config.outputs.deploy_worker == 'true' || needs.check-config.outputs.should_migrate == 'true'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          echo "移除遗留 Queue Consumer（usage-events -> api-worker）..."
-          REMOVE_OUTPUT=""
-          REMOVE_STATUS=0
-          set +e
-          REMOVE_OUTPUT=$(bunx wrangler queues consumer remove usage-events api-worker --config apps/worker/wrangler.toml 2>&1)
-          REMOVE_STATUS=$?
-          set -e
-          if [ $REMOVE_STATUS -eq 0 ]; then
-            echo "✅ 已移除遗留 Queue Consumer"
-          else
-            if echo "$REMOVE_OUTPUT" | grep -Eqi "not found|does not exist|code: 10007|code: 11009|No queue consumers"; then
-              echo "ℹ️ 未发现遗留 Queue Consumer，跳过"
-            else
-              echo "⚠️ 移除 Queue Consumer 失败，继续部署（输出如下）:"
-              echo "$REMOVE_OUTPUT"
-            fi
-          fi
 
       - name: Create or verify D1 Database
         if: needs.check-config.outputs.deploy_worker == 'true' || needs.check-config.outputs.deploy_ui == 'true' || needs.check-config.outputs.should_migrate == 'true'

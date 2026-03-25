@@ -51,5 +51,8 @@ new_sqlite_classes = ["UsageLimiter"]
 tag = "v3"
 new_sqlite_classes = ["CacheVersionStore"]
 
+[[migrations]]
+tag = "v4"
+deleted_classes = ["UsageLimiter"]
 
 

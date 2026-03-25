@@ -1,8 +1,4 @@
-import type {
-	D1Database,
-	ExecutionContext,
-} from "@cloudflare/workers-types";
-import type { Bindings } from "../env";
+import type { D1Database } from "@cloudflare/workers-types";
 import {
 	recordChannelModelError,
 	upsertChannelModelCapabilities,
@@ -11,7 +7,7 @@ import { insertAttemptEvent, type AttemptLogInput } from "./attempt-events";
 import type { UsageInput } from "./usage";
 import { recordUsage } from "./usage";
 
-export type UsageQueueEvent =
+export type UsageEvent =
 	| {
 			type: "usage";
 			payload: UsageInput;
@@ -38,17 +34,6 @@ export type UsageQueueEvent =
 			payload: AttemptLogInput;
 	  };
 
-type QueueMessage<T> = {
-	body: T;
-	ack: () => void;
-	retry: () => void;
-};
-
-type QueueBatchLike<T> = {
-	queue: string;
-	messages: QueueMessage<T>[];
-};
-
 function resolveNowSeconds(value?: number): number {
 	if (typeof value === "number" && Number.isFinite(value) && value > 0) {
 		return Math.floor(value);
@@ -56,9 +41,9 @@ function resolveNowSeconds(value?: number): number {
 	return Math.floor(Date.now() / 1000);
 }
 
-export async function processUsageQueueEvent(
+export async function processUsageEvent(
 	db: D1Database,
-	event: UsageQueueEvent,
+	event: UsageEvent,
 ): Promise<void> {
 	if (event.type === "usage") {
 		await recordUsage(db, event.payload);
@@ -88,21 +73,4 @@ export async function processUsageQueueEvent(
 	if (event.type === "attempt_log") {
 		await insertAttemptEvent(db, event.payload);
 	}
-}
-
-export async function handleUsageQueue(
-	batch: QueueBatchLike<UsageQueueEvent>,
-	env: Bindings,
-	ctx: ExecutionContext,
-): Promise<void> {
-	const db = env.DB;
-	const tasks = batch.messages.map(async (message) => {
-		try {
-			await processUsageQueueEvent(db, message.body);
-			message.ack();
-		} catch {
-			message.retry();
-		}
-	});
-	ctx.waitUntil(Promise.all(tasks));
 }

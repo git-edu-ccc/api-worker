@@ -60,9 +60,9 @@ import {
 } from "../services/hot-kv";
 import { getCacheConfig, getProxyRuntimeSettings } from "../services/settings";
 import {
-	processUsageQueueEvent,
-	type UsageQueueEvent,
-} from "../services/usage-queue";
+	processUsageEvent,
+	type UsageEvent,
+} from "../services/usage-events";
 import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
 import { extractReasoningEffort } from "../utils/reasoning";
@@ -1314,9 +1314,9 @@ function getStreamUsageMaxParsers(settings: {
 
 function createUsageEventScheduler(
 	c: { env: AppEnv["Bindings"]; executionCtx?: ExecutionContextLike },
-): (event: UsageQueueEvent) => void {
-	return (event: UsageQueueEvent) => {
-		const task = processUsageQueueEvent(c.env.DB, event).catch(() => undefined);
+): (event: UsageEvent) => void {
+	return (event: UsageEvent) => {
+		const task = processUsageEvent(c.env.DB, event).catch(() => undefined);
 		scheduleDbWrite(c, task);
 	};
 }

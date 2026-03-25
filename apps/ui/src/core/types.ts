@@ -129,7 +129,6 @@ export type Settings = {
 	proxy_model_failure_cooldown_threshold?: number;
 	runtime_settings?: RuntimeProxySettings;
 	runtime_config?: RuntimeProxyConfig;
-	usage_queue_status?: UsageQueueStatus | null;
 };
 
 export type RuntimeProxySettings = {
@@ -144,9 +143,6 @@ export type RuntimeProxySettings = {
 	stream_usage_parse_timeout_ms: number;
 	responses_affinity_ttl_seconds: number;
 	stream_options_capability_ttl_seconds: number;
-	usage_queue_enabled: boolean;
-	usage_queue_daily_limit: number;
-	usage_queue_direct_write_ratio: number;
 	attempt_worker_fallback_enabled: boolean;
 	attempt_worker_fallback_threshold: number;
 	large_request_offload_threshold_bytes: number;
@@ -155,29 +151,6 @@ export type RuntimeProxySettings = {
 export type RuntimeProxyConfig = RuntimeProxySettings & {
 	attempt_worker_bound: boolean;
 	attempt_worker_fallback_active: boolean;
-	usage_queue_bound: boolean;
-	usage_queue_active: boolean;
-};
-
-export type UsageQueueStatus = {
-	count: number | null;
-	date: string | null;
-	limit: number;
-	enabled: boolean;
-	bound: boolean;
-	active: boolean;
-	reserved_count: number | null;
-	enqueue_success_count: number | null;
-	direct_count: number | null;
-	fallback_direct_count: number | null;
-	reserve_failed_count: number | null;
-	reserve_over_limit_count: number | null;
-	queue_send_failed_count: number | null;
-	target_queue_ratio: number;
-	target_direct_ratio: number;
-	effective_queue_ratio: number | null;
-	effective_direct_ratio: number | null;
-	effective_total_count: number | null;
 };
 
 export type ModelChannel = {
@@ -247,9 +220,6 @@ export type SettingsForm = {
 	proxy_stream_usage_parse_timeout_ms: string;
 	proxy_responses_affinity_ttl_seconds: string;
 	proxy_stream_options_capability_ttl_seconds: string;
-	proxy_usage_queue_enabled: boolean;
-	usage_queue_daily_limit: string;
-	usage_queue_direct_write_ratio: string;
 	proxy_attempt_worker_fallback_enabled: boolean;
 	proxy_attempt_worker_fallback_threshold: string;
 	proxy_large_request_offload_threshold_bytes: string;
