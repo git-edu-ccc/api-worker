@@ -145,7 +145,6 @@ export type RuntimeProxySettings = {
 	model_failure_cooldown_threshold: number;
 	model_failure_auto_disable_threshold: number;
 	stream_usage_mode: string;
-	stream_usage_max_bytes: number;
 	stream_usage_max_parsers: number;
 	stream_usage_parse_timeout_ms: number;
 	responses_affinity_ttl_seconds: number;
@@ -228,7 +227,6 @@ export type SettingsForm = {
 	proxy_retry_sleep_error_codes: string[];
 	proxy_zero_completion_as_error_enabled: boolean;
 	proxy_stream_usage_mode: string;
-	proxy_stream_usage_max_bytes: string;
 	proxy_stream_usage_max_parsers: string;
 	proxy_stream_usage_parse_timeout_ms: string;
 	proxy_responses_affinity_ttl_seconds: string;

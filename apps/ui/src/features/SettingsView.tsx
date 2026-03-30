@@ -673,31 +673,6 @@ export const SettingsView = ({
 							<div class="app-settings-row__main">
 								<label
 									class="app-settings-row__label"
-									for="proxy-stream-usage-max-bytes"
-								>
-									流式解析最大字节
-								</label>
-								<p class="app-settings-row__hint">0 表示不限制</p>
-							</div>
-							<Input
-								class="app-settings-row__control app-settings-row__control--compact"
-								id="proxy-stream-usage-max-bytes"
-								name="proxy_stream_usage_max_bytes"
-								type="number"
-								min="0"
-								value={settingsForm.proxy_stream_usage_max_bytes}
-								onInput={(event) => {
-									const target = event.currentTarget as HTMLInputElement | null;
-									onFormChange({
-										proxy_stream_usage_max_bytes: target?.value ?? "",
-									});
-								}}
-							/>
-						</div>
-						<div class="app-settings-row">
-							<div class="app-settings-row__main">
-								<label
-									class="app-settings-row__label"
 									for="proxy-stream-usage-max-parsers"
 								>
 									流式解析并发上限

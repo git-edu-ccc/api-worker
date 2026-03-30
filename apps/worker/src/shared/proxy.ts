@@ -163,9 +163,7 @@ const HA_TRACE_ID_HEADER = "x-ha-trace-id";
 const HA_ATTEMPT_COUNT_HEADER = "x-ha-attempt-count";
 const HA_CANDIDATE_COUNT_HEADER = "x-ha-candidate-count";
 const MAX_ATTEMPT_WORKER_INVOCATIONS = 31;
-const HARD_STREAM_USAGE_MAX_BYTES = 256 * 1024;
-const HARD_STREAM_USAGE_MAX_PARSERS = 8;
-const HARD_STREAM_USAGE_PARSE_TIMEOUT_MS = 15000;
+const USAGE_OBSERVE_FAILURE_STAGE = "usage_observe";
 
 let activeStreamUsageParsers = 0;
 
@@ -1249,12 +1247,21 @@ function formatUsageErrorMessage(
 	return `${combined.slice(0, safeMaxLength - 1)}…`;
 }
 
+function stringifyErrorMeta(meta: Record<string, unknown>): string | null {
+	try {
+		return JSON.stringify(meta);
+	} catch {
+		return null;
+	}
+}
+
 function classifyStreamUsageParseError(
 	error: unknown,
 	maxLength: number,
 ): {
 	errorCode: string;
 	errorMessage: string;
+	errorMetaJson: string | null;
 } {
 	if (error instanceof StreamUsageParseError) {
 		return {
@@ -1264,6 +1271,15 @@ function classifyStreamUsageParseError(
 				error.detail,
 				maxLength,
 			),
+			errorMetaJson: stringifyErrorMeta({
+				type: "stream_usage_parse_error",
+				code: error.code,
+				detail: normalizeMessage(error.detail),
+				bytes_read: error.bytesRead,
+				events_seen: error.eventsSeen,
+				sampled_payload: error.sampledPayload,
+				sample_truncated: error.sampleTruncated,
+			}),
 		};
 	}
 	if (error instanceof Error) {
@@ -1275,12 +1291,21 @@ function classifyStreamUsageParseError(
 				normalizeMessage(error.message) ?? error.name,
 				maxLength,
 			),
+			errorMetaJson: stringifyErrorMeta({
+				type: "stream_usage_parse_error",
+				code: errorCode,
+				detail: normalizeMessage(error.message) ?? error.name,
+			}),
 		};
 	}
 	const errorCode = STREAM_USAGE_NON_ERROR_THROWN_CODE;
 	return {
 		errorCode,
 		errorMessage: errorCode,
+		errorMetaJson: stringifyErrorMeta({
+			type: "stream_usage_parse_error",
+			code: errorCode,
+		}),
 	};
 }
 
@@ -1387,19 +1412,9 @@ function buildAttemptSequence(
 
 function getStreamUsageOptions(settings: {
 	stream_usage_mode: string;
-	stream_usage_max_bytes: number;
 }): StreamUsageOptions {
-	const configuredMaxBytes = Math.max(
-		0,
-		Math.floor(settings.stream_usage_max_bytes),
-	);
-	const effectiveMaxBytes =
-		configuredMaxBytes === 0
-			? HARD_STREAM_USAGE_MAX_BYTES
-			: Math.min(configuredMaxBytes, HARD_STREAM_USAGE_MAX_BYTES);
 	return {
 		mode: settings.stream_usage_mode as StreamUsageMode,
-		maxBytes: effectiveMaxBytes,
 	};
 }
 
@@ -1410,10 +1425,9 @@ function getStreamUsageMaxParsers(settings: {
 		0,
 		Math.floor(settings.stream_usage_max_parsers),
 	);
-	if (configuredMaxParsers === 0) {
-		return HARD_STREAM_USAGE_MAX_PARSERS;
-	}
-	return Math.min(configuredMaxParsers, HARD_STREAM_USAGE_MAX_PARSERS);
+	return configuredMaxParsers === 0
+		? Number.POSITIVE_INFINITY
+		: configuredMaxParsers;
 }
 
 function getStreamUsageParseTimeoutMs(settings: {
@@ -1423,10 +1437,7 @@ function getStreamUsageParseTimeoutMs(settings: {
 		0,
 		Math.floor(settings.stream_usage_parse_timeout_ms),
 	);
-	if (configuredTimeoutMs === 0) {
-		return HARD_STREAM_USAGE_PARSE_TIMEOUT_MS;
-	}
-	return Math.min(configuredTimeoutMs, HARD_STREAM_USAGE_PARSE_TIMEOUT_MS);
+	return configuredTimeoutMs;
 }
 
 function createUsageEventScheduler(c: {
@@ -4418,6 +4429,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 			.executionCtx;
 		const streamUsageOptions = getStreamUsageOptions(runtimeSettings);
 		const streamUsageMaxParsers = getStreamUsageMaxParsers(runtimeSettings);
+		const streamUsageMode = streamUsageOptions.mode ?? "full";
 		let usageFinalized = false;
 		const finalizeUsage = (
 			options: Parameters<typeof recordAttemptUsage>[0],
@@ -4427,6 +4439,42 @@ proxy.all("/*", tokenAuth, async (c) => {
 			}
 			usageFinalized = true;
 			recordAttemptUsage(options);
+		};
+		const buildStreamUsageObserveMeta = (options: {
+			reason: string;
+			firstTokenLatencyMs?: number | null;
+			bytesRead?: number;
+			eventsSeen?: number;
+			sampledPayload?: string | null;
+			sampleTruncated?: boolean;
+			parseErrorMetaJson?: string | null;
+		}): string | null => {
+			const parseErrorMeta =
+				typeof options.parseErrorMetaJson === "string"
+					? safeJsonParse<Record<string, unknown> | null>(
+							options.parseErrorMetaJson,
+							null,
+						)
+					: null;
+			return stringifyErrorMeta({
+				type: "stream_usage_observe",
+				trace_id: traceId,
+				reason: options.reason,
+				mode: streamUsageMode,
+				parse_timeout_ms: streamUsageParseTimeoutMs,
+				parser_limit: Number.isFinite(streamUsageMaxParsers)
+					? streamUsageMaxParsers
+					: null,
+				active_parsers: activeStreamUsageParsers,
+				has_header_usage: selectedHasUsageHeaders,
+				has_immediate_usage: Boolean(selectedImmediateUsage),
+				first_token_latency_ms: options.firstTokenLatencyMs ?? null,
+				bytes_read: options.bytesRead ?? null,
+				events_seen: options.eventsSeen ?? null,
+				sampled_payload: options.sampledPayload ?? null,
+				sample_truncated: options.sampleTruncated === true,
+				parse_error: parseErrorMeta,
+			});
 		};
 		const canParseStream =
 			streamUsageOptions.mode !== "off" &&
@@ -4440,15 +4488,16 @@ proxy.all("/*", tokenAuth, async (c) => {
 				latencyMs: selectedLatencyMs,
 				firstTokenLatencyMs: null,
 				usage: selectedImmediateUsage,
-				status: selectedImmediateUsage ? "ok" : "error",
+				status: "ok",
 				upstreamStatus: selectedResponse.status,
-				errorCode: selectedImmediateUsage ? null : fallbackMissingCode,
-				errorMessage: selectedImmediateUsage
-					? null
-					: `usage_missing: ${fallbackMissingCode}`,
-				failureStage: "usage_finalize",
-				failureReason: selectedImmediateUsage ? null : fallbackMissingCode,
+				errorCode: fallbackMissingCode,
+				errorMessage: `usage_missing: ${fallbackMissingCode}`,
+				failureStage: USAGE_OBSERVE_FAILURE_STAGE,
+				failureReason: fallbackMissingCode,
 				usageSource: fallbackUsageSource,
+				errorMetaJson: buildStreamUsageObserveMeta({
+					reason: fallbackMissingCode,
+				}),
 			});
 		} else {
 			activeStreamUsageParsers += 1;
@@ -4466,17 +4515,25 @@ proxy.all("/*", tokenAuth, async (c) => {
 							latencyMs: selectedLatencyMs,
 							firstTokenLatencyMs: streamUsage.firstTokenLatencyMs,
 							usage: usageValue,
-							status: usageValue ? "ok" : "error",
+							status: "ok",
 							upstreamStatus: selectedResponse.status,
-							errorCode: usageValue ? null : "usage_parse_timeout",
-							errorMessage: usageValue ? null : timeoutMessage,
-							failureStage: "usage_finalize",
-							failureReason: usageValue ? null : "usage_parse_timeout",
+							errorCode: "usage_parse_timeout",
+							errorMessage: timeoutMessage,
+							failureStage: USAGE_OBSERVE_FAILURE_STAGE,
+							failureReason: "usage_parse_timeout",
 							usageSource: usageValue
 								? selectedImmediateUsage
 									? "header"
 									: "sse"
 								: "none",
+							errorMetaJson: buildStreamUsageObserveMeta({
+								reason: "usage_parse_timeout",
+								firstTokenLatencyMs: streamUsage.firstTokenLatencyMs,
+								bytesRead: streamUsage.bytesRead,
+								eventsSeen: streamUsage.eventsSeen,
+								sampledPayload: streamUsage.sampledPayload,
+								sampleTruncated: streamUsage.sampleTruncated,
+							}),
 						});
 						return;
 					}
@@ -4491,13 +4548,21 @@ proxy.all("/*", tokenAuth, async (c) => {
 							latencyMs: selectedLatencyMs,
 							firstTokenLatencyMs: streamUsage.firstTokenLatencyMs,
 							usage: null,
-							status: "error",
+							status: "ok",
 							upstreamStatus: selectedResponse.status,
 							errorCode: streamUsageMissingCode,
 							errorMessage: streamUsageMissingMessage,
-							failureStage: "usage_finalize",
+							failureStage: USAGE_OBSERVE_FAILURE_STAGE,
 							failureReason: streamUsageMissingCode,
 							usageSource: "none",
+							errorMetaJson: buildStreamUsageObserveMeta({
+								reason: streamUsageMissingCode,
+								firstTokenLatencyMs: streamUsage.firstTokenLatencyMs,
+								bytesRead: streamUsage.bytesRead,
+								eventsSeen: streamUsage.eventsSeen,
+								sampledPayload: streamUsage.sampledPayload,
+								sampleTruncated: streamUsage.sampleTruncated,
+							}),
 						});
 						return;
 					}
@@ -4524,17 +4589,17 @@ proxy.all("/*", tokenAuth, async (c) => {
 						latencyMs: selectedLatencyMs,
 						firstTokenLatencyMs: null,
 						usage: selectedImmediateUsage,
-						status: selectedImmediateUsage ? "ok" : "error",
+						status: "ok",
 						upstreamStatus: selectedResponse.status,
-						errorCode: selectedImmediateUsage ? null : parseFailure.errorCode,
-						errorMessage: selectedImmediateUsage
-							? null
-							: parseFailure.errorMessage,
-						failureStage: "usage_finalize",
-						failureReason: selectedImmediateUsage
-							? null
-							: parseFailure.errorCode,
+						errorCode: parseFailure.errorCode,
+						errorMessage: parseFailure.errorMessage,
+						failureStage: USAGE_OBSERVE_FAILURE_STAGE,
+						failureReason: parseFailure.errorCode,
 						usageSource: selectedImmediateUsage ? "header" : "none",
+						errorMetaJson: buildStreamUsageObserveMeta({
+							reason: parseFailure.errorCode,
+							parseErrorMetaJson: parseFailure.errorMetaJson,
+						}),
 					});
 				})
 				.finally(() => {

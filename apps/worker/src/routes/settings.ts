@@ -86,7 +86,6 @@ settings.put("/", async (c) => {
 		model_failure_cooldown_threshold?: number;
 		model_failure_auto_disable_threshold?: number;
 		stream_usage_mode?: string;
-		stream_usage_max_bytes?: number;
 		stream_usage_max_parsers?: number;
 		stream_usage_parse_timeout_ms?: number;
 		responses_affinity_ttl_seconds?: number;
@@ -292,20 +291,6 @@ settings.put("/", async (c) => {
 			);
 		}
 		runtimePatch.stream_usage_mode = mode;
-		runtimeTouched = true;
-	}
-
-	if (body.proxy_stream_usage_max_bytes !== undefined) {
-		const maxBytes = Number(body.proxy_stream_usage_max_bytes);
-		if (Number.isNaN(maxBytes) || maxBytes < 0) {
-			return jsonError(
-				c,
-				400,
-				"invalid_proxy_stream_usage_max_bytes",
-				"invalid_proxy_stream_usage_max_bytes",
-			);
-		}
-		runtimePatch.stream_usage_max_bytes = Math.floor(maxBytes);
 		runtimeTouched = true;
 	}
 

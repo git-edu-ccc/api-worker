@@ -65,7 +65,6 @@ export const initialSettingsForm: SettingsForm = {
 	],
 	proxy_zero_completion_as_error_enabled: true,
 	proxy_stream_usage_mode: "full",
-	proxy_stream_usage_max_bytes: "0",
 	proxy_stream_usage_max_parsers: "0",
 	proxy_stream_usage_parse_timeout_ms: "0",
 	proxy_responses_affinity_ttl_seconds: "86400",

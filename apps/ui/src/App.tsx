@@ -726,9 +726,6 @@ const App = () => {
 			proxy_zero_completion_as_error_enabled:
 				runtimeSettings?.zero_completion_as_error_enabled ?? true,
 			proxy_stream_usage_mode: runtimeSettings?.stream_usage_mode ?? "full",
-			proxy_stream_usage_max_bytes: String(
-				runtimeSettings?.stream_usage_max_bytes ?? 0,
-			),
 			proxy_stream_usage_max_parsers: String(
 				runtimeSettings?.stream_usage_max_parsers ?? 0,
 			),
@@ -1437,9 +1434,6 @@ const App = () => {
 			const streamUsageMode = settingsForm.proxy_stream_usage_mode
 				.trim()
 				.toLowerCase();
-			const streamUsageMaxBytes = Number(
-				settingsForm.proxy_stream_usage_max_bytes,
-			);
 			const streamUsageMaxParsers = Number(
 				settingsForm.proxy_stream_usage_max_parsers,
 			);
@@ -1511,10 +1505,6 @@ const App = () => {
 				pushNotice("warning", "流式解析模式需为 full/lite/off");
 				return;
 			}
-			if (Number.isNaN(streamUsageMaxBytes) || streamUsageMaxBytes < 0) {
-				pushNotice("warning", "最大字节数需为非负整数");
-				return;
-			}
 			if (Number.isNaN(streamUsageMaxParsers) || streamUsageMaxParsers < 0) {
 				pushNotice("warning", "并发上限需为非负整数");
 				return;
@@ -1582,7 +1572,6 @@ const App = () => {
 				proxy_zero_completion_as_error_enabled:
 					settingsForm.proxy_zero_completion_as_error_enabled,
 				proxy_stream_usage_mode: streamUsageMode,
-				proxy_stream_usage_max_bytes: streamUsageMaxBytes,
 				proxy_stream_usage_max_parsers: streamUsageMaxParsers,
 				proxy_stream_usage_parse_timeout_ms: streamUsageParseTimeoutMs,
 				proxy_responses_affinity_ttl_seconds: responsesAffinityTtlSeconds,

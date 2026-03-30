@@ -15,6 +15,10 @@ export type StreamUsage = {
 	usage: NormalizedUsage | null;
 	firstTokenLatencyMs: number | null;
 	timedOut?: boolean;
+	bytesRead?: number;
+	eventsSeen?: number;
+	sampledPayload?: string | null;
+	sampleTruncated?: boolean;
 };
 
 export type StreamUsageMode = "full" | "lite" | "off";
@@ -33,12 +37,29 @@ export type StreamUsageParseErrorCode =
 export class StreamUsageParseError extends Error {
 	code: StreamUsageParseErrorCode;
 	detail: string | null;
+	bytesRead: number;
+	eventsSeen: number;
+	sampledPayload: string | null;
+	sampleTruncated: boolean;
 
-	constructor(code: StreamUsageParseErrorCode, detail?: string | null) {
+	constructor(
+		code: StreamUsageParseErrorCode,
+		detail?: string | null,
+		context?: {
+			bytesRead?: number;
+			eventsSeen?: number;
+			sampledPayload?: string | null;
+			sampleTruncated?: boolean;
+		},
+	) {
 		super(code);
 		this.name = "StreamUsageParseError";
 		this.code = code;
 		this.detail = detail ?? null;
+		this.bytesRead = Math.max(0, Math.floor(context?.bytesRead ?? 0));
+		this.eventsSeen = Math.max(0, Math.floor(context?.eventsSeen ?? 0));
+		this.sampledPayload = context?.sampledPayload ?? null;
+		this.sampleTruncated = context?.sampleTruncated === true;
 	}
 }
 
@@ -168,6 +189,32 @@ export async function parseUsageFromSse(
 	const start = Date.now();
 	let firstTokenLatencyMs: number | null = null;
 	let bytesRead = 0;
+	let eventsSeen = 0;
+	const sampleLimit = 2048;
+	let sampledPayload = "";
+	let sampleTruncated = false;
+	const appendSample = (payload: string): void => {
+		if (!payload || sampleTruncated) {
+			return;
+		}
+		const chunk = payload.length > 240 ? `${payload.slice(0, 240)}…` : payload;
+		const prefix = sampledPayload.length > 0 ? "\n" : "";
+		const remaining = sampleLimit - sampledPayload.length;
+		if (remaining <= 0) {
+			sampleTruncated = true;
+			return;
+		}
+		const nextChunk = `${prefix}${chunk}`;
+		if (nextChunk.length > remaining) {
+			sampledPayload += nextChunk.slice(0, remaining);
+			sampleTruncated = true;
+			return;
+		}
+		sampledPayload += nextChunk;
+		if (sampledPayload.length >= sampleLimit) {
+			sampleTruncated = true;
+		}
+	};
 
 	const payloadMayContainUsage = (payload: string): boolean => {
 		if (!payload) {
@@ -187,6 +234,12 @@ export async function parseUsageFromSse(
 			throw new StreamUsageParseError(
 				"usage_stream_reader_failed",
 				normalizeErrorDetail(error),
+				{
+					bytesRead,
+					eventsSeen,
+					sampledPayload: sampledPayload || null,
+					sampleTruncated,
+				},
 			);
 		}
 		const { done, value } = chunk;
@@ -206,6 +259,8 @@ export async function parseUsageFromSse(
 			if (line.startsWith("data:")) {
 				const payload = line.slice(5).trim();
 				if (payload && payload !== "[DONE]") {
+					eventsSeen += 1;
+					appendSample(payload);
 					if (firstTokenLatencyMs === null) {
 						firstTokenLatencyMs = Date.now() - start;
 					}
@@ -220,6 +275,12 @@ export async function parseUsageFromSse(
 						throw new StreamUsageParseError(
 							"usage_sse_line_parse_failed",
 							normalizeErrorDetail(error),
+							{
+								bytesRead,
+								eventsSeen,
+								sampledPayload: sampledPayload || null,
+								sampleTruncated,
+							},
 						);
 					}
 					if (wasmCandidate) {
@@ -229,7 +290,15 @@ export async function parseUsageFromSse(
 							if (timeoutId) {
 								clearTimeout(timeoutId);
 							}
-							return { usage, firstTokenLatencyMs, timedOut };
+							return {
+								usage,
+								firstTokenLatencyMs,
+								timedOut,
+								bytesRead,
+								eventsSeen,
+								sampledPayload: sampledPayload || null,
+								sampleTruncated,
+							};
 						}
 						newlineIndex = buffer.indexOf("\n");
 						continue;
@@ -244,11 +313,21 @@ export async function parseUsageFromSse(
 	if (remaining.startsWith("data:")) {
 		const payload = remaining.slice(5).trim();
 		if (payload && payload !== "[DONE]") {
+			eventsSeen += 1;
+			appendSample(payload);
 			if (firstTokenLatencyMs === null) {
 				firstTokenLatencyMs = Date.now() - start;
 			}
 			if (mode === "lite" && !payloadMayContainUsage(payload)) {
-				return { usage, firstTokenLatencyMs, timedOut };
+				return {
+					usage,
+					firstTokenLatencyMs,
+					timedOut,
+					bytesRead,
+					eventsSeen,
+					sampledPayload: sampledPayload || null,
+					sampleTruncated,
+				};
 			}
 			let wasmCandidate: NormalizedUsage | null = null;
 			try {
@@ -257,6 +336,12 @@ export async function parseUsageFromSse(
 				throw new StreamUsageParseError(
 					"usage_sse_tail_parse_failed",
 					normalizeErrorDetail(error),
+					{
+						bytesRead,
+						eventsSeen,
+						sampledPayload: sampledPayload || null,
+						sampleTruncated,
+					},
 				);
 			}
 			if (wasmCandidate) {
@@ -264,7 +349,15 @@ export async function parseUsageFromSse(
 				if (timeoutId) {
 					clearTimeout(timeoutId);
 				}
-				return { usage, firstTokenLatencyMs, timedOut };
+				return {
+					usage,
+					firstTokenLatencyMs,
+					timedOut,
+					bytesRead,
+					eventsSeen,
+					sampledPayload: sampledPayload || null,
+					sampleTruncated,
+				};
 			}
 		}
 	}
@@ -272,5 +365,13 @@ export async function parseUsageFromSse(
 	if (timeoutId) {
 		clearTimeout(timeoutId);
 	}
-	return { usage, firstTokenLatencyMs, timedOut };
+	return {
+		usage,
+		firstTokenLatencyMs,
+		timedOut,
+		bytesRead,
+		eventsSeen,
+		sampledPayload: sampledPayload || null,
+		sampleTruncated,
+	};
 }

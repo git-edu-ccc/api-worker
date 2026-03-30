@@ -11,7 +11,6 @@ const DEFAULT_MODEL_FAILURE_COOLDOWN_MINUTES = 720;
 const DEFAULT_MODEL_FAILURE_COOLDOWN_THRESHOLD = 3;
 const DEFAULT_MODEL_FAILURE_AUTO_DISABLE_THRESHOLD = 3;
 const DEFAULT_PROXY_STREAM_USAGE_MODE = "full";
-const DEFAULT_PROXY_STREAM_USAGE_MAX_BYTES = 0;
 const DEFAULT_PROXY_STREAM_USAGE_MAX_PARSERS = 0;
 const DEFAULT_PROXY_STREAM_USAGE_PARSE_TIMEOUT_MS = 0;
 const DEFAULT_PROXY_RESPONSES_AFFINITY_TTL_SECONDS = 24 * 60 * 60;
@@ -52,7 +51,6 @@ const PROXY_RETRY_SLEEP_ERROR_CODES_KEY = "proxy_retry_sleep_error_codes";
 const PROXY_ZERO_COMPLETION_AS_ERROR_KEY =
 	"proxy_zero_completion_as_error_enabled";
 const PROXY_STREAM_USAGE_MODE_KEY = "proxy_stream_usage_mode";
-const PROXY_STREAM_USAGE_MAX_BYTES_KEY = "proxy_stream_usage_max_bytes";
 const PROXY_STREAM_USAGE_MAX_PARSERS_KEY = "proxy_stream_usage_max_parsers";
 const PROXY_STREAM_USAGE_PARSE_TIMEOUT_KEY =
 	"proxy_stream_usage_parse_timeout_ms";
@@ -79,7 +77,6 @@ const RUNTIME_SETTING_KEYS = [
 	MODEL_FAILURE_COOLDOWN_THRESHOLD_KEY,
 	MODEL_FAILURE_AUTO_DISABLE_THRESHOLD_KEY,
 	PROXY_STREAM_USAGE_MODE_KEY,
-	PROXY_STREAM_USAGE_MAX_BYTES_KEY,
 	PROXY_STREAM_USAGE_MAX_PARSERS_KEY,
 	PROXY_STREAM_USAGE_PARSE_TIMEOUT_KEY,
 	PROXY_RESPONSES_AFFINITY_TTL_KEY,
@@ -102,7 +99,6 @@ export type RuntimeProxyConfig = {
 	model_failure_cooldown_threshold: number;
 	model_failure_auto_disable_threshold: number;
 	stream_usage_mode: string;
-	stream_usage_max_bytes: number;
 	stream_usage_max_parsers: number;
 	attempt_worker_fallback_enabled: boolean;
 	attempt_worker_fallback_threshold: number;
@@ -124,7 +120,6 @@ export type ProxyRuntimeSettings = {
 	model_failure_cooldown_threshold: number;
 	model_failure_auto_disable_threshold: number;
 	stream_usage_mode: string;
-	stream_usage_max_bytes: number;
 	stream_usage_max_parsers: number;
 	stream_usage_parse_timeout_ms: number;
 	responses_affinity_ttl_seconds: number;
@@ -355,10 +350,6 @@ export async function getProxyRuntimeSettings(
 		stream_usage_mode: normalizeStreamUsageMode(
 			settings[PROXY_STREAM_USAGE_MODE_KEY],
 		),
-		stream_usage_max_bytes: parseNonNegativeSetting(
-			settings[PROXY_STREAM_USAGE_MAX_BYTES_KEY] ?? null,
-			DEFAULT_PROXY_STREAM_USAGE_MAX_BYTES,
-		),
 		stream_usage_max_parsers: parseNonNegativeSetting(
 			settings[PROXY_STREAM_USAGE_MAX_PARSERS_KEY] ?? null,
 			DEFAULT_PROXY_STREAM_USAGE_MAX_PARSERS,
@@ -516,15 +507,6 @@ export async function setProxyRuntimeSettings(
 	if (update.stream_usage_mode !== undefined) {
 		tasks.push(
 			upsertSetting(db, PROXY_STREAM_USAGE_MODE_KEY, update.stream_usage_mode),
-		);
-	}
-	if (update.stream_usage_max_bytes !== undefined) {
-		tasks.push(
-			upsertSetting(
-				db,
-				PROXY_STREAM_USAGE_MAX_BYTES_KEY,
-				String(Math.max(0, Math.floor(update.stream_usage_max_bytes))),
-			),
 		);
 	}
 	if (update.stream_usage_max_parsers !== undefined) {
