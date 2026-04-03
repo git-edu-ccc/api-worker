@@ -22,6 +22,7 @@
 - 支持从非流式 JSON、响应头与流式 SSE（含 `response.usage` 与 `usageMetadata`）解析 usage 字段
 - 流式请求自动补 `stream_options.include_usage=true` 以便上游返回 usage
 - 流式 usage 解析支持 `full/lite/off` 模式（`lite` 仅解析包含 usage 的事件；解析过程不再按固定字节数截断，主要受超时与并发上限控制）
+- OpenAI→Anthropic 的 SSE 适配除文本外，还需将 `tool_calls` 转为 Anthropic `tool_use + input_json_delta` 事件链，保证 Claude Code 可继续消费工具调用流
 - 对 `/v1/responses` 且上游返回 400/404 时回退为 `/responses` 重试一次
 - 可配置失败重试轮询（响应 5xx/429 时触发）
 - 记录流式请求标记、首 token 延迟与推理强度到 usage_logs

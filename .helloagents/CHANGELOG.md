@@ -12,6 +12,9 @@
 
 - **[proxy/usage]**: 删除 stream usage 旁路解析的固定 `maxBytes` 截断，避免长 Responses 流在尾部 usage 到达前被误记为 `stream_meta_partial` — by lsy
   - 方案: [202604030046_remove-stream-usage-maxbytes](archive/2026-04/202604030046_remove-stream-usage-maxbytes/)
+- **[worker/proxy]**: 修复 OpenAI→Anthropic 流式适配仅转文本导致 Claude Code 无法消费工具调用，补齐 `tool_calls -> tool_use + input_json_delta` 事件链 — by Codex
+  - 类型: 快速修改（无方案包）
+  - 文件: apps/worker/src/services/chat-response-adapter.ts, apps/worker/src/services/chat-response-adapter.test.ts, .helloagents/modules/proxy.md
 
 ### 快速修改
 

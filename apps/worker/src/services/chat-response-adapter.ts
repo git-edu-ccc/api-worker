@@ -196,6 +196,61 @@ function parseJsonFromStreamLine(line: string): Record<string, unknown> | null {
 	return safeJsonParse<Record<string, unknown> | null>(payload, null);
 }
 
+type OpenAiStreamToolCallDelta = {
+	index: number;
+	id: string | null;
+	name: string | null;
+	argumentsChunk: string;
+};
+
+function extractOpenAiToolCallDeltas(
+	payload: Record<string, unknown>,
+): OpenAiStreamToolCallDelta[] {
+	const choices = Array.isArray(payload.choices)
+		? (payload.choices as Record<string, unknown>[])
+		: [];
+	const firstChoice = choices[0];
+	if (!firstChoice || typeof firstChoice !== "object") {
+		return [];
+	}
+	const delta =
+		firstChoice.delta && typeof firstChoice.delta === "object"
+			? (firstChoice.delta as Record<string, unknown>)
+			: null;
+	if (!delta || !Array.isArray(delta.tool_calls)) {
+		return [];
+	}
+	return delta.tool_calls.flatMap((rawToolCall, position) => {
+		if (!rawToolCall || typeof rawToolCall !== "object") {
+			return [];
+		}
+		const toolCall = rawToolCall as Record<string, unknown>;
+		const fn =
+			toolCall.function && typeof toolCall.function === "object"
+				? (toolCall.function as Record<string, unknown>)
+				: null;
+		return [
+			{
+				index: typeof toolCall.index === "number" ? toolCall.index : position,
+				id: typeof toolCall.id === "string" ? toolCall.id : null,
+				name: typeof fn?.name === "string" ? fn.name : null,
+				argumentsChunk: typeof fn?.arguments === "string" ? fn.arguments : "",
+			},
+		];
+	});
+}
+
+function closeAnthropicContentBlock(
+	controller: ReadableStreamDefaultController<Uint8Array>,
+	encoder: TextEncoder,
+	index: number,
+): void {
+	writeSseEvent(controller, encoder, "content_block_stop", {
+		type: "content_block_stop",
+		index,
+	});
+}
+
 function extractOpenAiResponseUsage(payload: Record<string, unknown>): {
 	inputTokens: number;
 	outputTokens: number;
@@ -554,6 +609,117 @@ function adaptOpenAiSseToAnthropic(options: AdaptOptions): Response {
 	let started = false;
 	let stopped = false;
 	let outputTokens = 0;
+	let textBlockStarted = false;
+	let textBlockClosed = false;
+	const toolCallState = new Map<
+		number,
+		{
+			id: string | null;
+			name: string | null;
+			started: boolean;
+			closed: boolean;
+			pendingArguments: string[];
+		}
+	>();
+
+	const ensureMessageStart = (
+		controller: ReadableStreamDefaultController<Uint8Array>,
+	) => {
+		if (started) {
+			return;
+		}
+		started = true;
+		writeSseEvent(controller, encoder, "message_start", {
+			type: "message_start",
+			message: {
+				id: messageId,
+				type: "message",
+				role: "assistant",
+				model: options.model ?? "",
+				content: [],
+				stop_reason: null,
+				stop_sequence: null,
+				usage: {
+					input_tokens: 0,
+					output_tokens: 0,
+				},
+			},
+		});
+	};
+
+	const ensureTextBlockStart = (
+		controller: ReadableStreamDefaultController<Uint8Array>,
+	) => {
+		if (textBlockStarted || textBlockClosed) {
+			return;
+		}
+		ensureMessageStart(controller);
+		textBlockStarted = true;
+		writeSseEvent(controller, encoder, "content_block_start", {
+			type: "content_block_start",
+			index: 0,
+			content_block: { type: "text", text: "" },
+		});
+	};
+
+	const ensureToolUseBlockStart = (
+		controller: ReadableStreamDefaultController<Uint8Array>,
+		index: number,
+		state: {
+			id: string | null;
+			name: string | null;
+			started: boolean;
+			closed: boolean;
+			pendingArguments: string[];
+		},
+	) => {
+		if (state.started || state.closed || !state.id || !state.name) {
+			return;
+		}
+		if (textBlockStarted && !textBlockClosed) {
+			closeAnthropicContentBlock(controller, encoder, 0);
+			textBlockClosed = true;
+		}
+		ensureMessageStart(controller);
+		state.started = true;
+		writeSseEvent(controller, encoder, "content_block_start", {
+			type: "content_block_start",
+			index,
+			content_block: {
+				type: "tool_use",
+				id: state.id,
+				name: state.name,
+				input: {},
+			},
+		});
+		for (const pendingArguments of state.pendingArguments) {
+			writeSseEvent(controller, encoder, "content_block_delta", {
+				type: "content_block_delta",
+				index,
+				delta: {
+					type: "input_json_delta",
+					partial_json: pendingArguments,
+				},
+			});
+		}
+		state.pendingArguments = [];
+	};
+
+	const closeOpenBlocks = (
+		controller: ReadableStreamDefaultController<Uint8Array>,
+	) => {
+		if (textBlockStarted && !textBlockClosed) {
+			closeAnthropicContentBlock(controller, encoder, 0);
+			textBlockClosed = true;
+		}
+		const startedToolBlocks = [...toolCallState.entries()]
+			.filter(([, state]) => state.started && !state.closed)
+			.sort(([left], [right]) => left - right);
+		for (const [index, state] of startedToolBlocks) {
+			closeAnthropicContentBlock(controller, encoder, index);
+			state.closed = true;
+		}
+	};
 
 	const stream = new ReadableStream<Uint8Array>({
 		async start(controller) {
@@ -588,31 +754,6 @@ function adaptOpenAiSseToAnthropic(options: AdaptOptions): Response {
 							newlineIndex = buffer.indexOf("\n");
 							continue;
 						}
-						if (!started) {
-							started = true;
-							writeSseEvent(controller, encoder, "message_start", {
-								type: "message_start",
-								message: {
-									id: messageId,
-									type: "message",
-									role: "assistant",
-									model: options.model ?? "",
-									content: [],
-									stop_reason: null,
-									stop_sequence: null,
-									usage: {
-										input_tokens: 0,
-										output_tokens: 0,
-									},
-								},
-							});
-							writeSseEvent(controller, encoder, "content_block_start", {
-								type: "content_block_start",
-								index: 0,
-								content_block: { type: "text", text: "" },
-							});
-						}
-
 						const wasmLine = adaptSseLineViaWasm(
 							parsed,
 							"openai",
@@ -625,14 +766,50 @@ function adaptOpenAiSseToAnthropic(options: AdaptOptions): Response {
 						if (typeof wasmLine.outputTokens === "number") {
 							outputTokens = wasmLine.outputTokens;
 						}
+						const toolCallDeltas = extractOpenAiToolCallDeltas(parsed);
 						const deltaText =
 							typeof wasmLine.text === "string" ? wasmLine.text : "";
 						if (deltaText) {
+							ensureTextBlockStart(controller);
 							writeSseEvent(controller, encoder, "content_block_delta", {
 								type: "content_block_delta",
 								index: 0,
 								delta: { type: "text_delta", text: deltaText },
 							});
+						}
+						for (const toolCallDelta of toolCallDeltas) {
+							const contentIndex =
+								(textBlockStarted || textBlockClosed ? 1 : 0) +
+								toolCallDelta.index;
+							const state = toolCallState.get(contentIndex) ?? {
+								id: null,
+								name: null,
+								started: false,
+								closed: false,
+								pendingArguments: [],
+							};
+							if (toolCallDelta.id) {
+								state.id = toolCallDelta.id;
+							}
+							if (toolCallDelta.name) {
+								state.name = toolCallDelta.name;
+							}
+							if (toolCallDelta.argumentsChunk) {
+								if (state.started) {
+									writeSseEvent(controller, encoder, "content_block_delta", {
+										type: "content_block_delta",
+										index: contentIndex,
+										delta: {
+											type: "input_json_delta",
+											partial_json: toolCallDelta.argumentsChunk,
+										},
+									});
+								} else {
+									state.pendingArguments.push(toolCallDelta.argumentsChunk);
+								}
+							}
+							ensureToolUseBlockStart(controller, contentIndex, state);
+							toolCallState.set(contentIndex, state);
 						}
 
 						const stopReason =
@@ -641,10 +818,7 @@ function adaptOpenAiSseToAnthropic(options: AdaptOptions): Response {
 								: null;
 						if (stopReason && !stopped) {
 							stopped = true;
-							writeSseEvent(controller, encoder, "content_block_stop", {
-								type: "content_block_stop",
-								index: 0,
-							});
+							closeOpenBlocks(controller);
 							writeSseEvent(controller, encoder, "message_delta", {
 								type: "message_delta",
 								delta: { stop_reason: stopReason, stop_sequence: null },
@@ -658,10 +832,7 @@ function adaptOpenAiSseToAnthropic(options: AdaptOptions): Response {
 					}
 				}
 				if (started && !stopped) {
-					writeSseEvent(controller, encoder, "content_block_stop", {
-						type: "content_block_stop",
-						index: 0,
-					});
+					closeOpenBlocks(controller);
 					writeSseEvent(controller, encoder, "message_delta", {
 						type: "message_delta",
 						delta: { stop_reason: "end_turn", stop_sequence: null },
