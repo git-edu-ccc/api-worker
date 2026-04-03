@@ -36,11 +36,18 @@ export const normalizeDevArgs = (args) =>
 	args
 		.filter(Boolean)
 		.map((item) => item.trim())
-		.filter((item) => item.length > 0 && item !== "--bg");
+		.filter(
+			(item) => item.length > 0 && item !== "--bg" && item !== "--_daemon",
+		);
 
 export const buildTaskArguments = (args) => {
 	const normalizedArgs = normalizeDevArgs(args);
 	return ["run", "dev", "--", ...normalizedArgs, "--bg"];
+};
+
+export const buildLinuxServiceArguments = (args) => {
+	const normalizedArgs = normalizeDevArgs(args);
+	return ["run", "dev", "--", ...normalizedArgs, "--_daemon"];
 };
 
 export const encodePowerShellCommand = (script) =>
@@ -111,7 +118,7 @@ export const quoteSystemdArgument = (arg) => {
 };
 
 export const buildLinuxAutostartUnit = ({ bunCommand, repoRoot, args }) => {
-	const command = [bunCommand, ...buildTaskArguments(args)]
+	const command = [bunCommand, ...buildLinuxServiceArguments(args)]
 		.map((item) => quoteSystemdArgument(item))
 		.join(" ");
 
@@ -131,6 +138,87 @@ export const buildLinuxAutostartUnit = ({ bunCommand, repoRoot, args }) => {
 		"WantedBy=default.target",
 		"",
 	].join("\n");
+};
+
+export const detectLinuxAutostartLaunchMode = (unitText) => {
+	const text = String(unitText ?? "");
+	if (text.includes("--_daemon")) {
+		return "direct-daemon";
+	}
+	if (text.includes("--bg")) {
+		return "legacy-bg";
+	}
+	return "unknown";
+};
+
+export const classifyLinuxAutostartStatus = ({
+	installed,
+	enabled,
+	activeState,
+	subState,
+	launchMode,
+	backgroundRunning,
+}) => {
+	if (!installed) {
+		return {
+			level: "info",
+			summary: "未开启",
+			running: false,
+			needsMigration: false,
+		};
+	}
+
+	if (!enabled) {
+		return {
+			level: "info",
+			summary: "已安装但未启用",
+			running: false,
+			needsMigration: false,
+		};
+	}
+
+	const systemdRunning =
+		activeState === "active" ||
+		activeState === "reloading" ||
+		subState === "running" ||
+		subState === "start-pre" ||
+		subState === "start-post";
+	const running = Boolean(backgroundRunning || systemdRunning);
+	const needsMigration = launchMode === "legacy-bg";
+
+	if (running && needsMigration) {
+		return {
+			level: "warn",
+			summary: "已开启，后台实例正在运行（旧配置）",
+			running,
+			needsMigration,
+		};
+	}
+
+	if (running) {
+		return {
+			level: "success",
+			summary: "已开启，当前运行中",
+			running,
+			needsMigration: false,
+		};
+	}
+
+	if (needsMigration) {
+		return {
+			level: "warn",
+			summary: "已开启，但当前未运行（旧配置）",
+			running: false,
+			needsMigration,
+		};
+	}
+
+	return {
+		level: "warn",
+		summary: "已开启，但当前未运行",
+		running: false,
+		needsMigration: false,
+	};
 };
 
 export const parseSystemctlShowOutput = (text) =>

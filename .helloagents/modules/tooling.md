@@ -39,7 +39,7 @@
 **条件**: 在启用 `systemd --user` 的 Linux 环境执行 `bun run autostart -- enable ...`
 **行为**: `scripts/autostart.mjs` 生成 `~/.config/systemd/user/api-worker-dev-autostart.service`，并通过 `systemctl --user daemon-reload` + `enable --now` 注册登录后自动启动
 **结果**: Linux 开发环境可复用同一条 `bun run autostart` 命令配置用户级自启动
-**补充**: `status` / `disable` 分别通过 `systemctl --user show` 与 `disable --now` 查询和移除同名 service；实际启动命令仍为 `bun run dev -- --bg`
+**补充**: Linux service 会直接托管 `scripts/dev.mjs` 的守护进程分支，不再通过 `--bg` 二次派生后台实例；`status` / `disable` 分别通过 `systemctl --user show` 与 `disable --now` 查询和移除同名 service，`status` 还会结合 `.dev/dev-runner.json` 判断后台实例是否真的在运行，并在检测到旧版 `--bg` service 时提示重新执行 `enable` 覆盖更新
 
 ## 依赖关系
 

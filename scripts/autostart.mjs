@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -10,8 +16,11 @@ import {
 	autostartTaskName,
 	backgroundLogModeOptions,
 	buildInteractiveEnableArgs,
+	buildLinuxServiceArguments,
 	buildLinuxAutostartUnit,
 	buildTaskArguments,
+	classifyLinuxAutostartStatus,
+	detectLinuxAutostartLaunchMode,
 	encodePowerShellCommand,
 	escapeForSingleQuotedPowerShell,
 	getLinuxAutostartPaths,
@@ -27,6 +36,7 @@ const rawArgs = process.argv.slice(2);
 const action = rawArgs[0]?.trim().toLowerCase() ?? "interactive";
 const devArgs = rawArgs.slice(1);
 const repoRoot = process.cwd();
+const devStatePath = path.join(repoRoot, ".dev", "dev-runner.json");
 
 const resolveBunCommand = () => {
 	if (process.env.BUN_BIN && existsSync(process.env.BUN_BIN)) {
@@ -126,6 +136,33 @@ const runSystemctlUser = (args, options = {}) =>
 		"systemctl --user 执行失败。",
 		options,
 	);
+
+const isPidRunning = (pid) => {
+	if (typeof pid !== "number" || Number.isNaN(pid)) {
+		return false;
+	}
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+};
+
+const readBackgroundState = () => {
+	if (!existsSync(devStatePath)) {
+		return null;
+	}
+	try {
+		const state = JSON.parse(readFileSync(devStatePath, "utf8"));
+		if (!isPidRunning(state.pid)) {
+			return null;
+		}
+		return state;
+	} catch {
+		return null;
+	}
+};
 
 const ensureLinuxSystemdUser = () => {
 	ensureLinux();
@@ -266,6 +303,8 @@ const getLinuxAutostartInfo = () => {
 		};
 	}
 
+	const unitContents = readFileSync(servicePath, "utf8");
+
 	const result = runSystemctlUser(
 		[
 			"show",
@@ -281,6 +320,8 @@ const getLinuxAutostartInfo = () => {
 
 	const details = parseSystemctlShowOutput(result.stdout);
 	const unitFileState = details.UnitFileState ?? "unknown";
+	const backgroundState = readBackgroundState();
+	const launchMode = detectLinuxAutostartLaunchMode(unitContents);
 	return {
 		enabled: unitFileState.startsWith("enabled"),
 		installed: true,
@@ -290,6 +331,8 @@ const getLinuxAutostartInfo = () => {
 		activeState: details.ActiveState ?? "unknown",
 		subState: details.SubState ?? "unknown",
 		fragmentPath: details.FragmentPath || servicePath,
+		backgroundState,
+		launchMode,
 	};
 };
 
@@ -312,7 +355,9 @@ const enableLinuxAutostart = (args) => {
 	console.log(`systemd 用户服务: ${linuxAutostartServiceName}`);
 	console.log(`服务文件: ${servicePath}`);
 	console.log(`工作目录: ${repoRoot}`);
-	console.log(`命令: ${[bunCommand, ...buildTaskArguments(args)].join(" ")}`);
+	console.log(
+		`命令: ${[bunCommand, ...buildLinuxServiceArguments(args)].join(" ")}`,
+	);
 };
 
 const disableLinuxAutostart = () => {
@@ -349,15 +394,45 @@ const printLinuxAutostartStatus = () => {
 		return;
 	}
 
-	if (service.enabled) {
-		console.log("✅ 自启动状态：已开启。");
-	} else {
-		console.log("ℹ️ 自启动状态：已安装但未启用。");
-	}
+	const status = classifyLinuxAutostartStatus({
+		installed: service.installed,
+		enabled: service.enabled,
+		activeState: service.activeState,
+		subState: service.subState,
+		launchMode: service.launchMode,
+		backgroundRunning: Boolean(service.backgroundState),
+	});
+	const statusPrefix =
+		status.level === "success" ? "✅" : status.level === "warn" ? "⚠️" : "ℹ️";
+	console.log(`${statusPrefix} 自启动状态：${status.summary}。`);
 	console.log(`systemd 用户服务: ${service.serviceName}`);
+	console.log(
+		`启动链路: ${
+			service.launchMode === "direct-daemon"
+				? "systemd 直接托管 dev 守护进程"
+				: service.launchMode === "legacy-bg"
+					? "旧版 --bg 二次派生"
+					: "未知"
+		}`,
+	);
 	console.log(`启用状态: ${service.unitFileState}`);
 	console.log(`当前状态: ${service.activeState}/${service.subState}`);
+	if (service.backgroundState) {
+		console.log(
+			`后台实例: 运行中（PID ${service.backgroundState.pid}，启动于 ${service.backgroundState.startedAt}）`,
+		);
+	} else {
+		console.log("后台实例: 未运行");
+	}
 	console.log(`服务文件: ${service.fragmentPath}`);
+	if (status.needsMigration) {
+		console.log(
+			"⚠️ 检测到旧版 Linux 自启动配置：该 service 仍通过 --bg 二次派生后台进程，systemd 无法可靠跟踪实际实例。",
+		);
+		console.log(
+			"⚠️ 请重新执行 bun run autostart -- enable [原有参数] 覆盖更新 service 文件。",
+		);
+	}
 };
 
 const enableAutostart = (args) => {
