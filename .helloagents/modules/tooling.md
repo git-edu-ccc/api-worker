@@ -21,7 +21,7 @@
 **条件**: 执行 `bun run dev -- --bg`
 **行为**: `scripts/dev.mjs` 以守护进程模式拉起开发服务，并记录 `.dev/dev-runner.json`
 **结果**: 可通过 `--status` / `--stop` 查看与停止后台实例
-**补充**: `--log-mode file|none` 控制后台日志是否写入 `.dev/dev-runner.log`；Windows 后台模式会同时为守护进程子进程启用隐藏窗口，并将 stdout/stderr 显式重定向到日志文件或空设备，降低额外控制台窗口弹出的概率
+**补充**: `--log-mode file|none` 控制后台日志是否写入 `.dev/dev-runner.log`；Windows 后台模式会同时为守护进程子进程启用隐藏窗口，并将 stdout/stderr 显式重定向到日志文件或空设备，降低额外控制台窗口弹出的概率；若状态文件缺失，`--status` / `autostart status` 会回退到实际守护进程探测，避免误报“未运行”
 
 ### 基础校验命令
 **条件**: 执行 `bun run typecheck` 或 `bun run test`

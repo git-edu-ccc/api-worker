@@ -11,10 +11,12 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { fileURLToPath } from "node:url";
 
 import {
 	autostartTaskName,
 	backgroundLogModeOptions,
+	buildBackgroundStateFromArgs,
 	buildInteractiveEnableArgs,
 	buildLinuxServiceArguments,
 	buildLinuxAutostartUnit,
@@ -35,8 +37,11 @@ import {
 const rawArgs = process.argv.slice(2);
 const action = rawArgs[0]?.trim().toLowerCase() ?? "interactive";
 const devArgs = rawArgs.slice(1);
-const repoRoot = process.cwd();
+const scriptPath = fileURLToPath(import.meta.url);
+const repoRoot = path.resolve(path.dirname(scriptPath), "..");
+const devScriptPath = path.join(repoRoot, "scripts", "dev.mjs");
 const devStatePath = path.join(repoRoot, ".dev", "dev-runner.json");
+const devLogPath = path.join(repoRoot, ".dev", "dev-runner.log");
 
 const resolveBunCommand = () => {
 	if (process.env.BUN_BIN && existsSync(process.env.BUN_BIN)) {
@@ -150,18 +155,56 @@ const isPidRunning = (pid) => {
 };
 
 const readBackgroundState = () => {
-	if (!existsSync(devStatePath)) {
-		return null;
-	}
-	try {
-		const state = JSON.parse(readFileSync(devStatePath, "utf8"));
-		if (!isPidRunning(state.pid)) {
-			return null;
+	if (existsSync(devStatePath)) {
+		try {
+			const state = JSON.parse(readFileSync(devStatePath, "utf8"));
+			if (isPidRunning(state.pid)) {
+				return state;
+			}
+		} catch {
+			// ignore and fall back to process probing
 		}
-		return state;
-	} catch {
+	}
+	if (process.platform === "win32") {
 		return null;
 	}
+	const psResult = spawnSync("ps", ["-eo", "pid=,args="], { encoding: "utf8" });
+	if (psResult.status !== 0) {
+		return null;
+	}
+	for (const line of psResult.stdout.split(/\r?\n/u)) {
+		const match = line.trim().match(/^(\d+)\s+(.+)$/u);
+		if (!match) {
+			continue;
+		}
+		const pid = Number(match[1]);
+		const commandLine = match[2];
+		if (
+			!commandLine.includes(devScriptPath) ||
+			!commandLine.includes("--_daemon")
+		) {
+			continue;
+		}
+		const parts = commandLine.split(/\s+/u);
+		const scriptIndex = parts.findIndex((item) => item === devScriptPath);
+		if (scriptIndex < 0) {
+			continue;
+		}
+		const startedAtResult = spawnSync(
+			"ps",
+			["-p", String(pid), "-o", "lstart="],
+			{
+				encoding: "utf8",
+			},
+		);
+		return buildBackgroundStateFromArgs({
+			pid,
+			args: parts.slice(scriptIndex + 1),
+			startedAt: startedAtResult.stdout.trim() || null,
+			defaultLogPath: devLogPath,
+		});
+	}
+	return null;
 };
 
 const ensureLinuxSystemdUser = () => {
@@ -181,6 +224,34 @@ const ensureLinuxSystemdUser = () => {
 			errorText || "当前 Linux 会话未启用 systemd --user，无法配置自启动。",
 		);
 	}
+};
+
+const getLinuxLingerEnabled = () => {
+	ensureLinux();
+	const username = process.env.USER?.trim();
+	if (!username) {
+		return null;
+	}
+	const result = runCommand(
+		"loginctl",
+		["show-user", username, "--property=Linger", "--value"],
+		"loginctl 执行失败。",
+		{ allowFailure: true },
+	);
+	if (result.error?.code === "ENOENT") {
+		return null;
+	}
+	if (result.error || result.status !== 0) {
+		return null;
+	}
+	const value = result.stdout.trim().toLowerCase();
+	if (value === "yes") {
+		return true;
+	}
+	if (value === "no") {
+		return false;
+	}
+	return null;
 };
 
 const buildScheduledTaskLauncher = (args) => {
@@ -204,7 +275,7 @@ const buildScheduledTaskLauncher = (args) => {
 const getWindowsAutostartInfo = () => {
 	ensureWindows();
 	const taskName = escapeForSingleQuotedPowerShell(autostartTaskName);
-	return runPowerShellJson(`
+	const task = runPowerShellJson(`
 $ErrorActionPreference = 'Stop'
 $task = Get-ScheduledTask -TaskName '${taskName}' -ErrorAction SilentlyContinue
 if ($null -eq $task) {
@@ -223,6 +294,12 @@ $action = $task.Actions | Select-Object -First 1
   workingDirectory = $action.WorkingDirectory
 } | ConvertTo-Json -Compress
 `);
+	return task
+		? {
+				...task,
+				backgroundState: readBackgroundState(),
+			}
+		: null;
 };
 
 const enableWindowsAutostart = (args) => {
@@ -281,6 +358,10 @@ const printWindowsAutostartStatus = () => {
 	const task = getWindowsAutostartInfo();
 	if (!task?.enabled) {
 		console.log("ℹ️ 自启动状态：未开启。");
+		const backgroundState = task?.backgroundState ?? readBackgroundState();
+		if (backgroundState) {
+			console.log(`后台实例: 运行中（PID ${backgroundState.pid}）`);
+		}
 		return;
 	}
 	console.log("✅ 自启动状态：已开启。");
@@ -289,17 +370,24 @@ const printWindowsAutostartStatus = () => {
 	console.log(`程序: ${task.execute}`);
 	console.log(`参数: ${task.arguments}`);
 	console.log(`工作目录: ${task.workingDirectory}`);
+	if (task.backgroundState) {
+		console.log(`后台实例: 运行中（PID ${task.backgroundState.pid}）`);
+	} else {
+		console.log("后台实例: 未运行");
+	}
 };
 
 const getLinuxAutostartInfo = () => {
 	ensureLinuxSystemdUser();
 	const { servicePath } = getLinuxAutostartPaths(homedir());
+	const lingerEnabled = getLinuxLingerEnabled();
 	if (!existsSync(servicePath)) {
 		return {
 			enabled: false,
 			installed: false,
 			serviceName: linuxAutostartServiceName,
 			servicePath,
+			lingerEnabled,
 		};
 	}
 
@@ -333,6 +421,7 @@ const getLinuxAutostartInfo = () => {
 		fragmentPath: details.FragmentPath || servicePath,
 		backgroundState,
 		launchMode,
+		lingerEnabled,
 	};
 };
 
@@ -358,6 +447,12 @@ const enableLinuxAutostart = (args) => {
 	console.log(
 		`命令: ${[bunCommand, ...buildLinuxServiceArguments(args)].join(" ")}`,
 	);
+	const lingerEnabled = getLinuxLingerEnabled();
+	if (lingerEnabled === false) {
+		console.log(
+			"⚠️ 当前用户未开启 linger；Linux 仅在用户登录后才会拉起该 user service。若希望开机后未登录也自动启动，请执行：sudo loginctl enable-linger $USER",
+		);
+	}
 };
 
 const disableLinuxAutostart = () => {
@@ -391,6 +486,10 @@ const printLinuxAutostartStatus = () => {
 	if (!service.installed) {
 		console.log("ℹ️ 自启动状态：未开启。");
 		console.log(`服务文件: ${service.servicePath}`);
+		const backgroundState = readBackgroundState();
+		if (backgroundState) {
+			console.log(`后台实例: 运行中（PID ${backgroundState.pid}）`);
+		}
 		return;
 	}
 
@@ -417,10 +516,15 @@ const printLinuxAutostartStatus = () => {
 	);
 	console.log(`启用状态: ${service.unitFileState}`);
 	console.log(`当前状态: ${service.activeState}/${service.subState}`);
-	if (service.backgroundState) {
+	if (service.lingerEnabled === false) {
 		console.log(
-			`后台实例: 运行中（PID ${service.backgroundState.pid}，启动于 ${service.backgroundState.startedAt}）`,
+			"⚠️ linger: 未开启（重启后需用户登录才会启动；若要未登录也自动启动，请执行 sudo loginctl enable-linger $USER）",
 		);
+	} else if (service.lingerEnabled === true) {
+		console.log("linger: 已开启");
+	}
+	if (service.backgroundState) {
+		console.log(`后台实例: 运行中（PID ${service.backgroundState.pid}）`);
 	} else if (status.running) {
 		console.log("后台实例: 已运行（由 systemd 直接托管）");
 	} else {

@@ -165,7 +165,8 @@ bun run dev -- [可选参数]
 - Windows：使用计划任务，不再写入 Startup `.cmd`
 - Windows：为避免 `bun.exe` 作为控制台程序拉起窗口，计划任务会先通过隐藏的 PowerShell 启动器再执行 `bun run dev -- --bg`
 - Linux：使用 `systemd --user`，会生成 `~/.config/systemd/user/api-worker-dev-autostart.service`
-- Linux：要求当前发行版启用了 user session 的 systemd；若需要在用户退出后继续保活，可自行额外配置 `loginctl enable-linger`
+- Linux：要求当前发行版启用了 user session 的 systemd；脚本会把仓库绝对路径写入 `WorkingDirectory`
+- Linux：默认属于 user service，通常在用户登录后启动；若需要开机后未登录也自动启动，请额外执行 `sudo loginctl enable-linger $USER`
 - Linux：service 会直接托管 `scripts/dev.mjs` 的守护进程分支
 - `bun run autostart -- status` 会同时显示“是否已启用”“当前是否正在运行”以及 Linux 旧版 `--bg` 配置提示
 - 登录后真正拉起 Worker / Wrangler / UI 的后台守护链路同样继续沿用 `scripts/dev.mjs` 的日志与运行时配置策略

@@ -221,6 +221,35 @@ export const classifyLinuxAutostartStatus = ({
 	};
 };
 
+export const buildBackgroundStateFromArgs = ({
+	pid,
+	args,
+	startedAt,
+	defaultLogPath,
+}) => {
+	const runtimeArgs = (args ?? []).filter(
+		(item) => item !== "--bg" && item !== "--_daemon",
+	);
+	let logMode = "file";
+	for (let index = 0; index < runtimeArgs.length; index += 1) {
+		if (runtimeArgs[index] !== "--log-mode") {
+			continue;
+		}
+		const nextValue = runtimeArgs[index + 1];
+		if (nextValue && !nextValue.startsWith("--")) {
+			logMode = nextValue.trim();
+		}
+		break;
+	}
+	return {
+		pid,
+		args: runtimeArgs,
+		startedAt,
+		logMode,
+		logPath: logMode === "file" ? defaultLogPath : null,
+	};
+};
+
 export const parseSystemctlShowOutput = (text) =>
 	String(text)
 		.split(/\r?\n/u)

@@ -35,6 +35,32 @@ export function buildLinuxAutostartUnit(input: {
 	repoRoot: string;
 	args: string[];
 }): string;
+export function classifyLinuxAutostartStatus(input: {
+	installed: boolean;
+	enabled: boolean;
+	activeState?: string;
+	subState?: string;
+	launchMode?: string;
+	backgroundRunning?: boolean;
+}): {
+	level: string;
+	summary: string;
+	running: boolean;
+	needsMigration: boolean;
+};
+export function detectLinuxAutostartLaunchMode(unitText: string): string;
+export function buildBackgroundStateFromArgs(input: {
+	pid: number;
+	args?: string[];
+	startedAt?: string | null;
+	defaultLogPath: string;
+}): {
+	pid: number;
+	args: string[];
+	startedAt?: string | null;
+	logMode: string;
+	logPath: string | null;
+};
 export function parseSystemctlShowOutput(text: unknown): Record<string, string>;
 export function getLinuxAutostartPaths(homeDirectory: string): {
 	userUnitDir: string;
