@@ -660,7 +660,19 @@ export async function refreshActiveChannelsViaWorker(
 	const items = await mapWithConcurrency(
 		channels,
 		runtime.concurrency,
-		async (channel) => refreshChannelModels(db, env, channel),
+		async (channel) => {
+			try {
+				return await refreshChannelModels(db, env, channel);
+			} catch (err: unknown) {
+				return {
+					site_id: channel.id,
+					site_name: channel.name,
+					status: "failed" as const,
+					message: err instanceof Error ? err.message : "未知的执行异常",
+					models: [],
+				};
+			}
+		},
 	);
 	const success = items.filter((item) => item.status === "success").length;
 	return {
@@ -711,50 +723,89 @@ export async function recoverDisabledChannelsViaWorker(
 		probeTargets,
 		runtime.concurrency,
 		async (channel) => {
-			const tokenRows = callTokenMap.get(channel.id) ?? [];
-			const tokens =
-				tokenRows.length > 0
-					? tokenRows.map((row) => ({
-							id: row.id,
-							name: row.name,
-							api_key: row.api_key,
-							models_json: row.models_json ?? null,
-						}))
-					: [
-							{
-								id: "primary",
-								name: "主调用令牌",
-								api_key: String(channel.api_key ?? ""),
-								models_json: null,
-							},
-						];
-			const verification = await verifySiteChannel({
-				channel,
-				tokens,
-				mode: "recovery",
-			});
-			await persistSiteVerificationResult({
-				db,
-				channel,
-				tokens,
-				result: verification,
-			});
+			try {
+				const tokenRows = callTokenMap.get(channel.id) ?? [];
+				const tokens =
+					tokenRows.length > 0
+						? tokenRows.map((row) => ({
+								id: row.id,
+								name: row.name,
+								api_key: row.api_key,
+								models_json: row.models_json ?? null,
+							}))
+						: [
+								{
+									id: "primary",
+									name: "主调用令牌",
+									api_key: String(channel.api_key ?? ""),
+									models_json: null,
+								},
+							];
+				const verification = await verifySiteChannel({
+					channel,
+					tokens,
+					mode: "recovery",
+				});
+				await persistSiteVerificationResult({
+					db,
+					channel,
+					tokens,
+					result: verification,
+				});
 
-			const recovered =
-				verification.verdict === "recoverable"
-					? await markDisabledChannelRecovered(db, channel.id)
-					: false;
-			return {
-				attempted: true,
-				recovered,
-				reason: recovered
-					? "eligible_for_recovery"
-					: verification.stages.recovery.code,
-				channel_id: channel.id,
-				channel_name: channel.name,
-				model: verification.selected_model ?? undefined,
-				verification,
-			} satisfies DisabledChannelRecoveryResult;
+				const recovered =
+					verification.verdict === "recoverable"
+						? await markDisabledChannelRecovered(db, channel.id)
+						: false;
+				return {
+					attempted: true,
+					recovered,
+					reason: recovered
+						? "eligible_for_recovery"
+						: verification.stages.recovery.code,
+					channel_id: channel.id,
+					channel_name: channel.name,
+					model: verification.selected_model ?? undefined,
+					verification,
+				} satisfies DisabledChannelRecoveryResult;
+			} catch (err: unknown) {
+				return {
+					attempted: true,
+					recovered: false,
+					reason: "probe_exception",
+					channel_id: channel.id,
+					channel_name: channel.name,
+					verification: {
+						site_id: channel.id,
+						site_name: channel.name,
+						mode: "recovery",
+						verdict: "not_recoverable",
+						message: err instanceof Error ? err.message : "恢复检测时发生异常",
+						suggested_action: "manual_review",
+						stages: {
+							connectivity: { status: "skip", code: "", message: "" },
+							capability: { status: "skip", code: "", message: "" },
+							service: { status: "skip", code: "", message: "" },
+							recovery: {
+								status: "fail",
+								code: "probe_exception",
+								message: err instanceof Error ? err.message : "恢复检测时发生异常",
+							},
+						},
+						selected_model: null,
+						selected_token: null,
+						discovered_models: [],
+						token_results: [],
+						token_summary: {
+							total: 0,
+							success: 0,
+							failed: 0,
+						},
+						trace: {},
+						checked_at: new Date().toISOString(),
+					},
+				} satisfies DisabledChannelRecoveryResult;
+			}
 		},
 	);
 
