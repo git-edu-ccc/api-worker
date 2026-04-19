@@ -22,7 +22,7 @@ import {
 	tokenAuth,
 } from "../../../worker/src/middleware/tokenAuth";
 import type { CallTokenItem } from "../../../worker/src/services/call-token-selector";
-import { resolveChannelAttemptTarget } from "../../../worker/src/services/channel-attemptability";
+import { resolveChannelAttemptTarget, type CallTokenSelection } from "../../../worker/src/services/channel-attemptability";
 import { listCallTokens } from "../../../worker/src/services/channel-call-token-repo";
 import {
 	listCoolingDownChannelsForModel,
@@ -1918,6 +1918,8 @@ type RoutableChannelSkip = {
 	recordModel: string | null;
 	upstreamProvider: ProviderType;
 	hasModelList: boolean;
+	tokenId: string | null;
+	tokenName: string | null;
 };
 
 function resolveAttemptableChannels(options: {
@@ -1953,6 +1955,8 @@ function resolveAttemptableChannels(options: {
 			recordModel: target.recordModel,
 			upstreamProvider: target.upstreamProvider,
 			hasModelList: target.tokenSelection.hasModelList,
+			tokenId: target.tokenSelection.token?.id ?? null,
+			tokenName: target.tokenSelection.token?.name ?? null,
 		});
 	}
 	return {
@@ -1976,6 +1980,8 @@ function buildNoRoutableChannelsMeta(skipped: RoutableChannelSkip[]): string {
 			model: item.recordModel,
 			upstream_provider: item.upstreamProvider,
 			has_model_list: item.hasModelList,
+			token_id: item.tokenId,
+			token_name: item.tokenName,
 		})),
 	});
 }
@@ -2963,6 +2969,8 @@ proxy.all("/*", tokenAuth, async (c) => {
 		failureReason?: string | null;
 		usageSource?: string | null;
 		errorMetaJson?: string | null;
+		tokenId?: string | null;
+		tokenName?: string | null;
 	}) => {
 		const normalized = options.usage ?? {
 			totalTokens: 0,
@@ -2993,6 +3001,8 @@ proxy.all("/*", tokenAuth, async (c) => {
 				usageSource:
 					options.usageSource ?? (options.usage ? "computed" : "none"),
 				errorMetaJson: options.errorMetaJson ?? null,
+				callTokenId: options.tokenId ?? selectedAttemptTokenId,
+				callTokenName: options.tokenName ?? selectedAttemptTokenName,
 			},
 		});
 	};
@@ -3011,6 +3021,8 @@ proxy.all("/*", tokenAuth, async (c) => {
 		endedAt: string;
 		rawSizeBytes?: number | null;
 		rawHash?: string | null;
+		tokenId?: string | null;
+		tokenName?: string | null;
 	}) => {
 		if (!runtimeSettings.attempt_log_enabled) {
 			return;
@@ -3033,6 +3045,8 @@ proxy.all("/*", tokenAuth, async (c) => {
 				endedAt: options.endedAt,
 				rawSizeBytes: options.rawSizeBytes ?? requestSizeBytes,
 				rawHash: options.rawHash ?? null,
+				callTokenId: options.tokenId ?? selectedAttemptTokenId,
+				callTokenName: options.tokenName ?? selectedAttemptTokenName,
 			},
 		});
 	};
@@ -3460,6 +3474,8 @@ proxy.all("/*", tokenAuth, async (c) => {
 	const nowSeconds = Math.floor(Date.now() / 1000);
 	let selectedResponse: Response | null = null;
 	let selectedChannel: ChannelRecord | null = null;
+	let selectedAttemptTokenId: string | null = null;
+	let selectedAttemptTokenName: string | null = null;
 	let selectedUpstreamProvider: ProviderType | null = null;
 	let selectedUpstreamEndpoint: EndpointType | null = null;
 	let selectedUpstreamModel: string | null = null;
@@ -3822,6 +3838,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 		upstreamProvider: ProviderType;
 		upstreamModel: string | null;
 		recordModel: string | null;
+		tokenSelection: CallTokenSelection;
 		attemptStartedAt: string;
 		streamOptionsHandled: boolean;
 		target: string;
@@ -3850,9 +3867,9 @@ proxy.all("/*", tokenAuth, async (c) => {
 			const upstreamProvider = attemptTarget.upstreamProvider;
 			const upstreamModel = attemptTarget.upstreamModel;
 			const recordModel = attemptTarget.recordModel;
+			const tokenSelection = attemptTarget.tokenSelection;
 			const baseUrl = resolveChannelBaseUrl(channel);
-			const apiKey =
-				attemptTarget.tokenSelection.token?.api_key ?? channel.api_key;
+			const apiKey = tokenSelection.token?.api_key ?? channel.api_key;
 			const headers = buildUpstreamHeaders(
 				new Headers(c.req.header()),
 				upstreamProvider,
@@ -4032,6 +4049,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 				upstreamProvider,
 				upstreamModel,
 				recordModel,
+				tokenSelection,
 				attemptStartedAt,
 				streamOptionsHandled: shouldHandleStreamOptions,
 				target,
@@ -4444,6 +4462,8 @@ proxy.all("/*", tokenAuth, async (c) => {
 								selectedHasUsageSignal = hasAnyUsageSignal;
 								selectedParsedStreamUsage = parsedSuccessStreamUsage;
 								selectedHasUsageHeaders = hasUsageHeaderSignal;
+								selectedAttemptTokenId = meta.tokenSelection.token?.id ?? null;
+								selectedAttemptTokenName = meta.tokenSelection.token?.name ?? null;
 								selectedAttemptIndex = attemptNumber;
 								selectedAttemptStartedAt = meta.attemptStartedAt;
 								selectedAttemptLatencyMs = attemptLatencyMs;
@@ -4621,10 +4641,10 @@ proxy.all("/*", tokenAuth, async (c) => {
 			const upstreamProvider = attemptTarget.upstreamProvider;
 			const upstreamModel = attemptTarget.upstreamModel;
 			const recordModel = attemptTarget.recordModel;
+			const tokenSelection = attemptTarget.tokenSelection;
 
 			const baseUrl = resolveChannelBaseUrl(channel);
-			const apiKey =
-				attemptTarget.tokenSelection.token?.api_key ?? channel.api_key;
+			const apiKey = tokenSelection.token?.api_key ?? channel.api_key;
 			const headers = buildUpstreamHeaders(
 				new Headers(c.req.header()),
 				upstreamProvider,
@@ -5680,6 +5700,8 @@ proxy.all("/*", tokenAuth, async (c) => {
 							hasModelList: (callTokenMap.get(channel.id) ?? []).some((token) =>
 								Boolean(token.models_json),
 							),
+							tokenId: null,
+							tokenName: null,
 						},
 					]),
 				).values(),
