@@ -8,6 +8,10 @@ import {
 	useState,
 } from "hono/jsx/dom";
 import {
+	getDefaultBaseUrlForSiteType,
+	supportsSiteCheckin,
+} from "../../shared-core/src";
+import {
 	Button,
 	Dialog,
 	DialogContent,
@@ -56,7 +60,6 @@ import type {
 	SiteTaskReportMap,
 	SiteVerificationBatchReport,
 	SiteVerificationResult,
-	SiteType,
 	TabId,
 	Token,
 	TokenForm,
@@ -110,12 +113,6 @@ const pathToTab: Record<string, TabId> = {
 	"/tokens": "tokens",
 	"/usage": "usage",
 	"/settings": "settings",
-};
-
-const DEFAULT_BASE_URL_BY_TYPE: Partial<Record<SiteType, string>> = {
-	openai: "https://api.openai.com",
-	anthropic: "https://api.anthropic.com",
-	gemini: "https://generativelanguage.googleapis.com",
 };
 
 type ConfirmState = {
@@ -918,7 +915,7 @@ const App = () => {
 				(!patch.base_url || patch.base_url.trim().length === 0) &&
 				!prev.base_url.trim()
 			) {
-				const fallback = DEFAULT_BASE_URL_BY_TYPE[patch.site_type];
+				const fallback = getDefaultBaseUrlForSiteType(patch.site_type);
 				if (fallback) {
 					next.base_url = fallback;
 				}
@@ -1414,7 +1411,7 @@ const App = () => {
 				return;
 			}
 			const baseUrlValue = siteForm.base_url.trim();
-			if (!baseUrlValue && !DEFAULT_BASE_URL_BY_TYPE[siteForm.site_type]) {
+			if (!baseUrlValue && !getDefaultBaseUrlForSiteType(siteForm.site_type)) {
 				pushNotice("warning", "基础 URL 不能为空");
 				return;
 			}
@@ -1431,7 +1428,7 @@ const App = () => {
 				return;
 			}
 			if (
-				siteForm.site_type === "new-api" &&
+				supportsSiteCheckin(siteForm.site_type) &&
 				siteForm.checkin_enabled &&
 				(!siteForm.system_token.trim() || !siteForm.system_userid.trim())
 			) {

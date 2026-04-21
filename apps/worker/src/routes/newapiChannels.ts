@@ -1,3 +1,4 @@
+import { normalizeSiteType } from "../../../shared-core/src";
 import { type Context, Hono } from "hono";
 import type { AppEnv } from "../env";
 import { newApiAuth } from "../middleware/newApiAuth";
@@ -20,6 +21,11 @@ import {
 	fetchChannelModels,
 	updateChannelTestResult,
 } from "../services/channel-testing";
+import { parseChannelMetadata } from "../services/channel-metadata";
+import {
+	parseProviderType,
+	resolveUpstreamProvider,
+} from "../services/upstreams";
 import { triggerBackupAfterDataChange } from "../services/backup-auto-sync";
 import { invalidateSelectionHotCache } from "../services/hot-kv";
 import {
@@ -44,6 +50,10 @@ import { normalizeBaseUrl } from "../utils/url";
 
 const newapi = new Hono<AppEnv>({ strict: false });
 newapi.use("*", newApiAuth);
+
+function parseSiteTypeInput(value: unknown) {
+	return value === undefined ? undefined : normalizeSiteType(value);
+}
 
 function readTag(metadataJson: string | null | undefined): string | null {
 	const metadata = safeJsonParse<Record<string, unknown>>(metadataJson, {});
@@ -387,10 +397,13 @@ newapi.get("/test/:id", async (c) => {
 	if (!channel) {
 		return newApiFailure(c, 404, "渠道不存在");
 	}
+	const metadata = parseChannelMetadata(channel.metadata_json);
+	const provider = resolveUpstreamProvider(metadata.site_type);
 
 	const result = await fetchChannelModels(
 		String(channel.base_url),
 		String(channel.api_key),
+		{ siteType: metadata.site_type, provider },
 	);
 	if (!result.ok) {
 		await updateChannelTestResult(c.env.DB, id, {
@@ -420,9 +433,12 @@ newapi.post("/test", async (c) => {
 	if (!channel) {
 		return newApiFailure(c, 404, "渠道不存在");
 	}
+	const metadata = parseChannelMetadata(channel.metadata_json);
+	const provider = resolveUpstreamProvider(metadata.site_type);
 	const result = await fetchChannelModels(
 		String(channel.base_url),
 		String(channel.api_key),
+		{ siteType: metadata.site_type, provider },
 	);
 	if (!result.ok) {
 		await updateChannelTestResult(c.env.DB, String(id), {
@@ -446,10 +462,13 @@ newapi.get("/fetch_models/:id", async (c) => {
 	if (!channel) {
 		return newApiFailure(c, 404, "渠道不存在");
 	}
+	const metadata = parseChannelMetadata(channel.metadata_json);
+	const provider = resolveUpstreamProvider(metadata.site_type);
 
 	const result = await fetchChannelModels(
 		String(channel.base_url),
 		String(channel.api_key),
+		{ siteType: metadata.site_type, provider },
 	);
 	if (!result.ok) {
 		await updateChannelTestResult(c.env.DB, id, {
@@ -475,9 +494,18 @@ newapi.post("/fetch_models", async (c) => {
 		return newApiFailure(c, 400, "缺少必要参数");
 	}
 
+	const siteType = parseSiteTypeInput(body?.site_type) ?? "new-api";
+	const provider = resolveUpstreamProvider(
+		siteType,
+		parseProviderType(body?.provider),
+	);
 	const result = await fetchChannelModels(
 		String(body.base_url),
 		String(body.key),
+		{
+			siteType,
+			provider,
+		},
 	);
 	if (!result.ok) {
 		return newApiFailure(c, 502, "获取模型失败");

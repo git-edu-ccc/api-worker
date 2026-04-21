@@ -16,7 +16,10 @@ siteTask.post("/test", async (c) => {
 	if (!body?.base_url || !Array.isArray(body.tokens)) {
 		return c.json({ error: "invalid_site_task_test_payload" }, 400);
 	}
-	const result = await testChannelTokens(body.base_url, body.tokens);
+	const result = await testChannelTokens(body.base_url, body.tokens, {
+		siteType: body.siteType,
+		provider: body.provider,
+	});
 	return c.json(result);
 });
 

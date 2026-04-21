@@ -3,8 +3,12 @@ import { nowIso } from "../utils/time";
 import { normalizeBaseUrl } from "../utils/url";
 import { listCallTokens } from "./channel-call-token-repo";
 import { modelsToJson } from "./channel-models";
+import { parseChannelMetadata, resolveProvider } from "./channel-metadata";
 import { listChannels } from "./channel-repo";
 import { fetchChannelModels, updateChannelTestResult } from "./channel-testing";
+import { normalizeChatRequest } from "./provider-transform";
+import { getProviderAdapter } from "./providers";
+import { buildProviderChatRequest } from "./providers/chat-request";
 import { inspectSuccessfulResponse } from "./successful-response";
 
 const RECOVERY_PROBE_PROMPT = "Reply with a short health-check message.";
@@ -44,6 +48,7 @@ type DisabledChannelItem = {
 	name: string;
 	base_url: string;
 	api_key: string;
+	metadata_json?: string | null;
 };
 
 /**
@@ -84,25 +89,54 @@ async function sendCompletionProbe(options: {
 	baseUrl: string;
 	apiKey: string;
 	model: string;
+	provider: "openai" | "anthropic" | "gemini";
+	metadataJson?: string | null;
 	fetcher?: typeof fetch;
 }): Promise<boolean> {
 	const fetcher = options.fetcher ?? fetch;
-	const target = `${normalizeBaseUrl(options.baseUrl)}/v1/chat/completions`;
+	const metadata = parseChannelMetadata(options.metadataJson);
+	const providerAdapter = getProviderAdapter(options.provider);
+	const normalized = normalizeChatRequest(
+		"openai",
+		"chat",
+		{
+			model: options.model,
+			messages: [{ role: "user", content: RECOVERY_PROBE_PROMPT }],
+			max_tokens: RECOVERY_PROBE_MAX_TOKENS,
+			temperature: 0,
+			stream: false,
+		},
+		options.model,
+		false,
+	);
+	if (!normalized) {
+		return false;
+	}
+	const request = buildProviderChatRequest(
+		options.provider,
+		normalized,
+		options.model,
+		"chat",
+		false,
+		metadata.endpoint_overrides,
+	);
+	if (!request) {
+		return false;
+	}
+	const target = request.absoluteUrl
+		? request.absoluteUrl
+		: `${normalizeBaseUrl(options.baseUrl)}${request.path}`;
+	const headers = providerAdapter.buildAuthHeaders(
+		new Headers({ "Content-Type": "application/json" }),
+		options.apiKey,
+		metadata.header_overrides,
+	);
 	let response: Response;
 	try {
 		response = await fetcher(target, {
 			method: "POST",
-			headers: {
-				Authorization: `Bearer ${options.apiKey}`,
-				"x-api-key": options.apiKey,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				model: options.model,
-				messages: [{ role: "user", content: RECOVERY_PROBE_PROMPT }],
-				max_tokens: RECOVERY_PROBE_MAX_TOKENS,
-				temperature: 0,
-			}),
+			headers,
+			body: JSON.stringify(request.body),
 		});
 	} catch {
 		return false;
@@ -160,11 +194,14 @@ async function recoverDisabledChannel(
 	let selectedElapsed = 0;
 	let elapsedSum = 0;
 	let elapsedCount = 0;
+	const metadata = parseChannelMetadata(channel.metadata_json);
+	const provider = resolveProvider(metadata.site_type);
 
 	for (const token of shuffleItems(tokens, random)) {
 		const result = await fetchChannelModels(
 			String(channel.base_url),
 			token.api_key,
+			{ siteType: metadata.site_type, provider },
 		);
 		elapsedSum += result.elapsed;
 		elapsedCount += 1;
@@ -214,6 +251,8 @@ async function recoverDisabledChannel(
 		baseUrl: String(channel.base_url),
 		apiKey: selectedToken.api_key,
 		model,
+		provider,
+		metadataJson: channel.metadata_json ?? null,
 		fetcher: options.fetcher,
 	});
 	if (!probeOk) {

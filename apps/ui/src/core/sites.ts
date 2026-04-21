@@ -1,3 +1,7 @@
+import {
+	getSiteTypeLabel,
+	supportsSiteCheckin,
+} from "../../../shared-core/src";
 import type {
 	Site,
 	SiteVerificationBatchSummary,
@@ -6,6 +10,8 @@ import type {
 	VerificationStageStatus,
 } from "./types";
 import { getBeijingDateString } from "./utils";
+
+export { getSiteTypeLabel };
 
 export type SiteSortKey =
 	| "name"
@@ -23,18 +29,6 @@ export type SiteSortState = {
 	key: SiteSortKey;
 	direction: SiteSortDirection;
 };
-
-export const SITE_TYPE_LABELS: Record<Site["site_type"], string> = {
-	"new-api": "New API",
-	"done-hub": "Done Hub",
-	subapi: "Sub API",
-	openai: "OpenAI",
-	anthropic: "Anthropic",
-	gemini: "Gemini",
-};
-
-export const getSiteTypeLabel = (siteType: Site["site_type"]) =>
-	SITE_TYPE_LABELS[siteType] ?? siteType;
 
 export const getSiteStatusLabel = (status: string) =>
 	status === "active" ? "启用" : "禁用";
@@ -179,7 +173,7 @@ export const summarizeVerificationResults = (
 
 export const getSiteCheckinLabel = (site: Site, today?: string) => {
 	const shouldShow =
-		site.site_type === "new-api" && Boolean(site.checkin_enabled);
+		supportsSiteCheckin(site.site_type) && Boolean(site.checkin_enabled);
 	if (!shouldShow) {
 		return "-";
 	}
@@ -230,7 +224,7 @@ const getSortValue = (site: Site, key: SiteSortKey, today: string) => {
 				getSiteCoolingMaxRemainingSeconds(site)
 			);
 		case "checkin_enabled":
-			return site.site_type === "new-api"
+			return supportsSiteCheckin(site.site_type)
 				? site.checkin_enabled
 					? "已开启"
 					: "已关闭"

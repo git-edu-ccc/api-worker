@@ -154,12 +154,14 @@ import {
 	type NormalizedEmbeddingRequest,
 	type NormalizedImageRequest,
 	normalizeChatRequest,
-	normalizeEmbeddingRequest,
-	normalizeImageRequest,
 	type ProviderType,
 	parseDownstreamModel,
 	parseDownstreamStream,
 } from "../../../worker/src/services/provider-transform";
+import {
+	normalizeProviderEmbeddingRequest,
+	normalizeProviderImageRequest,
+} from "../../../worker/src/services/providers/normalize";
 import { getProxyRuntimeSettings } from "../../../worker/src/services/settings";
 import {
 	processUsageEvent,
@@ -502,7 +504,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 		if (!ensuredBody) {
 			return null;
 		}
-		normalizedEmbedding = normalizeEmbeddingRequest(
+		normalizedEmbedding = normalizeProviderEmbeddingRequest(
 			downstreamProvider,
 			ensuredBody,
 			downstreamModel,
@@ -520,7 +522,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 		if (!ensuredBody) {
 			return null;
 		}
-		normalizedImage = normalizeImageRequest(
+		normalizedImage = normalizeProviderImageRequest(
 			downstreamProvider,
 			ensuredBody,
 			downstreamModel,

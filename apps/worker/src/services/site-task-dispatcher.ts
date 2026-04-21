@@ -34,6 +34,7 @@ import type {
 } from "./site-task-contract";
 import { testChannelTokens } from "./channel-testing";
 import { modelsToJson } from "./channel-models";
+import { parseChannelMetadata, resolveProvider } from "./channel-metadata";
 import { upsertChannelModelCapabilities } from "./channel-model-capabilities";
 
 type SiteTaskRuntime = {
@@ -352,7 +353,11 @@ export async function executeSiteTestTask(
 		runtime,
 		"/internal/site-task/test",
 		payload,
-		() => testChannelTokens(payload.base_url, payload.tokens),
+		() =>
+			testChannelTokens(payload.base_url, payload.tokens, {
+				siteType: payload.siteType,
+				provider: payload.provider,
+			}),
 		options,
 	);
 }
@@ -567,8 +572,12 @@ async function refreshChannelModels(
 						api_key: String(channel.api_key ?? ""),
 					},
 				];
+	const metadata = parseChannelMetadata(channel.metadata_json);
+	const provider = resolveProvider(metadata.site_type);
 	const result = await executeSiteTestTask(db, env, {
 		base_url: String(channel.base_url),
+		siteType: metadata.site_type,
+		provider,
 		tokens,
 	});
 	if (!result.ok || result.models.length === 0) {
@@ -789,7 +798,8 @@ export async function recoverDisabledChannelsViaWorker(
 							recovery: {
 								status: "fail",
 								code: "probe_exception",
-								message: err instanceof Error ? err.message : "恢复检测时发生异常",
+								message:
+									err instanceof Error ? err.message : "恢复检测时发生异常",
 							},
 						},
 						selected_model: null,

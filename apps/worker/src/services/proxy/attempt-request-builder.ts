@@ -4,12 +4,12 @@ import {
 	resolveChannelBaseUrl,
 } from "./request-planning";
 import { transformOpenAiStreamOptions } from "./usage-observe";
+import { getProviderAdapter } from "../providers";
+import { buildProviderChatRequest } from "../providers/chat-request";
 import {
-	applyGeminiModelToPath,
-	buildUpstreamChatRequest,
-	buildUpstreamEmbeddingRequest,
-	buildUpstreamImageRequest,
-} from "../provider-transform";
+	buildProviderEmbeddingRequest,
+	buildProviderImageRequest,
+} from "../providers/requests";
 import { rewriteModelInRawJsonRequest } from "./request-body";
 
 export type PreparedAttemptRequest = {
@@ -56,6 +56,7 @@ export async function prepareAttemptRequest(options: {
 }): Promise<PreparedAttemptRequest | null> {
 	const metadata = options.attemptTarget.metadata;
 	const upstreamProvider = options.attemptTarget.upstreamProvider;
+	const providerAdapter = getProviderAdapter(upstreamProvider as any);
 	const upstreamModel = options.attemptTarget.upstreamModel;
 	const recordModel = options.attemptTarget.recordModel;
 	const tokenSelection = options.attemptTarget.tokenSelection;
@@ -81,12 +82,11 @@ export async function prepareAttemptRequest(options: {
 		if (!sameProvider) {
 			return null;
 		}
-		if (upstreamProvider === "gemini") {
-			upstreamRequestPath = applyGeminiModelToPath(
-				upstreamRequestPath,
-				upstreamModel,
-			);
-		} else if (upstreamModel) {
+		upstreamRequestPath = providerAdapter.applyModelToPath(
+			upstreamRequestPath,
+			upstreamModel,
+		);
+		if (upstreamRequestPath === options.targetPath && upstreamModel) {
 			upstreamBodyText = options.parsedBody
 				? JSON.stringify({
 						...options.parsedBody,
@@ -95,12 +95,11 @@ export async function prepareAttemptRequest(options: {
 				: rewriteModelInRawJsonRequest(upstreamBodyText, upstreamModel);
 		}
 	} else if (sameProvider) {
-		if (upstreamProvider === "gemini") {
-			upstreamRequestPath = applyGeminiModelToPath(
-				upstreamRequestPath,
-				upstreamModel,
-			);
-		} else if (upstreamModel) {
+		upstreamRequestPath = providerAdapter.applyModelToPath(
+			upstreamRequestPath,
+			upstreamModel,
+		);
+		if (upstreamRequestPath === options.targetPath && upstreamModel) {
 			upstreamBodyText = options.parsedBody
 				? JSON.stringify({
 						...options.parsedBody,
@@ -119,7 +118,7 @@ export async function prepareAttemptRequest(options: {
 			if (!chatPayload) {
 				return null;
 			}
-			const request = buildUpstreamChatRequest(
+			const request = buildProviderChatRequest(
 				upstreamProvider as any,
 				chatPayload,
 				upstreamModel,
@@ -139,7 +138,7 @@ export async function prepareAttemptRequest(options: {
 			if (!embeddingPayload) {
 				return null;
 			}
-			const request = buildUpstreamEmbeddingRequest(
+			const request = buildProviderEmbeddingRequest(
 				upstreamProvider as any,
 				embeddingPayload,
 				upstreamModel,
@@ -157,7 +156,7 @@ export async function prepareAttemptRequest(options: {
 			if (!imagePayload) {
 				return null;
 			}
-			const request = buildUpstreamImageRequest(
+			const request = buildProviderImageRequest(
 				upstreamProvider as any,
 				imagePayload,
 				upstreamModel,

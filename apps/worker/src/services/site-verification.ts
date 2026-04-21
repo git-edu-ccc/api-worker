@@ -18,12 +18,9 @@ import {
 	collectCandidateModels,
 	mergeVerificationTokenModels,
 } from "./site-verification-selection";
-import {
-	buildUpstreamChatRequest,
-	normalizeChatRequest,
-	type ProviderType,
-} from "./provider-transform";
-import type { SiteType } from "./site-metadata";
+import { normalizeChatRequest } from "./provider-transform";
+import { getProviderAdapter } from "./providers";
+import { buildProviderChatRequest } from "./providers/chat-request";
 
 export type VerificationStageStatus = "pass" | "warn" | "fail" | "skip";
 
@@ -124,13 +121,6 @@ const MINIMAL_PROBE_PROMPT = "Reply with OK.";
 const MINIMAL_PROBE_MAX_TOKENS = 8;
 const VERIFICATION_ERROR_DETAIL_MAX_LENGTH = 180;
 
-const openAiCompatibleSiteTypes = new Set<SiteType>([
-	"new-api",
-	"done-hub",
-	"subapi",
-	"openai",
-]);
-
 const defaultConnectivityResult = (): VerificationStageResult => ({
 	status: "skip",
 	code: "not_started",
@@ -225,28 +215,6 @@ function applyQueryOverrides(
 	}
 	const query = params.toString();
 	return query ? `${basePath}?${query}` : basePath;
-}
-
-function buildVerificationHeaders(
-	provider: ProviderType,
-	apiKey: string,
-	overrides: Record<string, string>,
-): Headers {
-	const headers = new Headers();
-	headers.set("Content-Type", "application/json");
-	if (provider === "openai") {
-		headers.set("Authorization", `Bearer ${apiKey}`);
-		headers.set("x-api-key", apiKey);
-	} else if (provider === "anthropic") {
-		headers.set("x-api-key", apiKey);
-		headers.set("anthropic-version", "2023-06-01");
-	} else {
-		headers.set("x-goog-api-key", apiKey);
-	}
-	for (const [key, value] of Object.entries(overrides)) {
-		headers.set(key, value);
-	}
-	return headers;
 }
 
 function summarizeVerificationDetail(text: string | null): string | null {
@@ -408,10 +376,6 @@ function summarizeVerdict(
 	};
 }
 
-function supportsModelDiscovery(siteType: SiteType): boolean {
-	return openAiCompatibleSiteTypes.has(siteType);
-}
-
 export async function verifySiteChannel(options: {
 	channel: ChannelRow;
 	tokens: VerificationToken[];
@@ -422,6 +386,7 @@ export async function verifySiteChannel(options: {
 	const channel = options.channel;
 	const metadata = parseChannelMetadata(channel.metadata_json);
 	const provider = resolveProvider(metadata.site_type);
+	const providerAdapter = getProviderAdapter(provider);
 	const mode = options.mode ?? "service";
 	const tokens = options.tokens.filter(
 		(token) => token.api_key.trim().length > 0,
@@ -477,8 +442,11 @@ export async function verifySiteChannel(options: {
 		return provisional;
 	}
 
-	if (supportsModelDiscovery(metadata.site_type)) {
-		const summary = await testChannelTokens(channel.base_url, tokens);
+	if (providerAdapter.supportsModelDiscovery()) {
+		const summary = await testChannelTokens(channel.base_url, tokens, {
+			siteType: metadata.site_type,
+			provider,
+		});
 		tokenResults = summary.items;
 		tokenSummary = {
 			total: summary.total,
@@ -684,7 +652,7 @@ export async function verifySiteChannel(options: {
 		};
 	}
 
-	const request = buildUpstreamChatRequest(
+	const request = buildProviderChatRequest(
 		provider,
 		normalized,
 		selectedModel,
@@ -740,8 +708,8 @@ export async function verifySiteChannel(options: {
 	const target = request.absoluteUrl
 		? applyQueryOverrides(request.absoluteUrl, metadata.query_overrides)
 		: `${normalizeBaseUrl(channel.base_url)}${targetPath}`;
-	const headers = buildVerificationHeaders(
-		provider,
+	const headers = providerAdapter.buildAuthHeaders(
+		new Headers(),
 		selectedToken.api_key,
 		metadata.header_overrides,
 	);

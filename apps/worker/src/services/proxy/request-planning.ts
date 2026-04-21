@@ -1,9 +1,9 @@
-import { sanitizeUpstreamRequestHeaders } from "../../../../shared-core/src";
 import type { TokenRecord } from "../../middleware/tokenAuth";
 import type { CallTokenItem } from "../call-token-selector";
 import { resolveChannelAttemptTarget } from "../channel-attemptability";
 import type { ChannelRecord } from "../channels";
 import type { EndpointType, ProviderType } from "../provider-transform";
+import { getProviderAdapter } from "../providers";
 import { safeJsonParse } from "../../utils/json";
 import { normalizeBaseUrl } from "../../utils/url";
 
@@ -154,22 +154,9 @@ export function buildUpstreamHeaders(
 	apiKey: string,
 	overrides: Record<string, string>,
 ): Headers {
-	const headers = sanitizeUpstreamRequestHeaders(baseHeaders);
-	headers.delete("x-admin-token");
-	headers.delete("x-api-key");
-	if (provider === "openai") {
-		headers.set("Authorization", `Bearer ${apiKey}`);
-		headers.set("x-api-key", apiKey);
-	} else if (provider === "anthropic") {
-		headers.delete("Authorization");
-		headers.set("x-api-key", apiKey);
-		headers.set("anthropic-version", "2023-06-01");
-	} else {
-		headers.delete("Authorization");
-		headers.set("x-goog-api-key", apiKey);
-	}
-	for (const [key, value] of Object.entries(overrides)) {
-		headers.set(key, value);
-	}
-	return headers;
+	return getProviderAdapter(provider).buildAuthHeaders(
+		baseHeaders,
+		apiKey,
+		overrides,
+	);
 }

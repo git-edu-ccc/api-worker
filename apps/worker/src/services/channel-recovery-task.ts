@@ -2,12 +2,16 @@ import {
 	testChannelTokens,
 	type ChannelTokenTestSummary,
 } from "./channel-testing";
+import { resolveUpstreamProvider } from "./upstreams";
+import { normalizeChatRequest } from "./provider-transform";
 import type {
 	SiteTaskProbeChannel,
 	SiteTaskProbeResult,
 	SiteTaskToken,
 } from "./site-task-contract";
 import { normalizeBaseUrl } from "../utils/url";
+import { getProviderAdapter } from "./providers";
+import { buildProviderChatRequest } from "./providers/chat-request";
 import { inspectSuccessfulResponse } from "./successful-response";
 
 const RECOVERY_PROBE_PROMPT = "Reply with a short health-check message.";
@@ -29,25 +33,52 @@ async function sendCompletionProbe(options: {
 	baseUrl: string;
 	apiKey: string;
 	model: string;
+	provider?: "openai" | "anthropic" | "gemini";
 	fetcher?: typeof fetch;
 }): Promise<boolean> {
 	const fetcher = options.fetcher ?? fetch;
-	const target = `${normalizeBaseUrl(options.baseUrl)}/v1/chat/completions`;
+	const providerAdapter = getProviderAdapter(options.provider ?? "openai");
+	const normalized = normalizeChatRequest(
+		"openai",
+		"chat",
+		{
+			model: options.model,
+			messages: [{ role: "user", content: RECOVERY_PROBE_PROMPT }],
+			max_tokens: RECOVERY_PROBE_MAX_TOKENS,
+			temperature: 0,
+			stream: false,
+		},
+		options.model,
+		false,
+	);
+	if (!normalized) {
+		return false;
+	}
+	const request = buildProviderChatRequest(
+		options.provider ?? "openai",
+		normalized,
+		options.model,
+		"chat",
+		false,
+		{},
+	);
+	if (!request) {
+		return false;
+	}
+	const target = request.absoluteUrl
+		? request.absoluteUrl
+		: `${normalizeBaseUrl(options.baseUrl)}${request.path}`;
+	const headers = providerAdapter.buildAuthHeaders(
+		new Headers({ "Content-Type": "application/json" }),
+		options.apiKey,
+		{},
+	);
 	let response: Response;
 	try {
 		response = await fetcher(target, {
 			method: "POST",
-			headers: {
-				Authorization: `Bearer ${options.apiKey}`,
-				"x-api-key": options.apiKey,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				model: options.model,
-				messages: [{ role: "user", content: RECOVERY_PROBE_PROMPT }],
-				max_tokens: RECOVERY_PROBE_MAX_TOKENS,
-				temperature: 0,
-			}),
+			headers,
+			body: JSON.stringify(request.body),
 		});
 	} catch {
 		return false;
@@ -114,7 +145,10 @@ export async function runDisabledChannelRecoveryProbe(
 		};
 	}
 
-	const summary = await testChannelTokens(channel.base_url, probeTokens);
+	const summary = await testChannelTokens(channel.base_url, probeTokens, {
+		siteType: channel.siteType,
+		provider: channel.provider,
+	});
 	if (!summary.ok) {
 		return {
 			attempted: true,
@@ -155,6 +189,10 @@ export async function runDisabledChannelRecoveryProbe(
 					baseUrl: channel.base_url,
 					apiKey: probeApiKey,
 					model,
+					provider: resolveUpstreamProvider(
+						channel.siteType ?? channel.provider ?? "new-api",
+						channel.provider,
+					),
 					fetcher: options.fetcher,
 				})
 			: false;

@@ -1,4 +1,10 @@
 import { Hono } from "hono";
+import {
+	getDefaultBaseUrlForSiteType,
+	normalizeSiteType,
+	supportsSiteCheckin,
+	type SiteType,
+} from "../../../shared-core/src";
 import type { AppEnv } from "../env";
 import {
 	listCallTokens,
@@ -19,7 +25,6 @@ import { invalidateSelectionHotCache } from "../services/hot-kv";
 import {
 	buildSiteMetadata,
 	parseSiteMetadata,
-	type SiteType,
 } from "../services/site-metadata";
 import {
 	recoverDisabledChannelsViaWorker,
@@ -74,20 +79,7 @@ type CallTokenPayload = SiteCallTokenInput & {
 };
 
 const parseSiteType = (value: unknown): SiteType => {
-	if (
-		value === "done-hub" ||
-		value === "new-api" ||
-		value === "subapi" ||
-		value === "openai" ||
-		value === "anthropic" ||
-		value === "gemini"
-	) {
-		return value;
-	}
-	if (value === "custom") {
-		return "subapi";
-	}
-	return "new-api";
+	return normalizeSiteType(value);
 };
 
 const trimValue = (value: unknown): string => {
@@ -97,18 +89,12 @@ const trimValue = (value: unknown): string => {
 	return value.trim();
 };
 
-const DEFAULT_BASE_URL_BY_TYPE: Partial<Record<SiteType, string>> = {
-	openai: "https://api.openai.com",
-	anthropic: "https://api.anthropic.com",
-	gemini: "https://generativelanguage.googleapis.com",
-};
-
 const resolveBaseUrl = (siteType: SiteType, raw: unknown): string => {
 	const trimmed = trimValue(raw);
 	if (trimmed) {
 		return normalizeBaseUrl(trimmed);
 	}
-	const fallback = DEFAULT_BASE_URL_BY_TYPE[siteType];
+	const fallback = getDefaultBaseUrlForSiteType(siteType);
 	if (fallback) {
 		return normalizeBaseUrl(fallback);
 	}
@@ -303,10 +289,9 @@ sites.post("/", async (c) => {
 		body.checkin_url !== undefined && body.checkin_url !== null
 			? trimValue(body.checkin_url)
 			: "";
-	const checkinEnabled =
-		siteType === "new-api"
-			? parseBoolean(body.checkin_enabled, body.checkin_status === "active")
-			: false;
+	const checkinEnabled = supportsSiteCheckin(siteType)
+		? parseBoolean(body.checkin_enabled, body.checkin_status === "active")
+		: false;
 	if (checkinEnabled && (!systemToken || !systemUser)) {
 		return jsonError(
 			c,
@@ -406,12 +391,11 @@ sites.patch("/:id", async (c) => {
 		typeof current.checkin_enabled === "boolean"
 			? current.checkin_enabled
 			: Number(current.checkin_enabled ?? 0) === 1;
-	const nextCheckinEnabled =
-		nextSiteType === "new-api"
-			? body.checkin_enabled !== undefined || body.checkin_status !== undefined
-				? parseBoolean(body.checkin_enabled, body.checkin_status === "active")
-				: currentCheckinEnabled
-			: false;
+	const nextCheckinEnabled = supportsSiteCheckin(nextSiteType)
+		? body.checkin_enabled !== undefined || body.checkin_status !== undefined
+			? parseBoolean(body.checkin_enabled, body.checkin_status === "active")
+			: currentCheckinEnabled
+		: false;
 	if (nextCheckinEnabled && (!nextSystemToken || !nextSystemUser)) {
 		return jsonError(
 			c,

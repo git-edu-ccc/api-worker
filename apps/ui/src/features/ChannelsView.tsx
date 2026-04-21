@@ -1,3 +1,8 @@
+import {
+	getDefaultBaseUrlForSiteType,
+	supportsSiteCheckin,
+	supportsSystemCredentials,
+} from "../../../shared-core/src";
 import { useEffect, useMemo, useRef, useState } from "hono/jsx/dom";
 import {
 	Button,
@@ -142,7 +147,7 @@ const requiredSiteColumns = [
 const siteColumnVersion = "2026-04-20";
 const columnTooltips: Partial<Record<SiteSortKey, string>> = {
 	cooldowns: "按冷却模型数量排序；数量相同则按最长剩余冷却时间排序。",
-	checkin_enabled: "仅 new-api 类型支持自动签到。",
+	checkin_enabled: "仅支持签到的上游才会显示并执行自动签到。",
 	checkin: "展示今天的签到结果。",
 };
 
@@ -425,12 +430,8 @@ export const ChannelsView = ({
 	const [cooldownDetailSite, setCooldownDetailSite] = useState<Site | null>(
 		null,
 	);
-	const isOfficialType =
-		siteForm.site_type === "openai" ||
-		siteForm.site_type === "anthropic" ||
-		siteForm.site_type === "gemini";
-	const needsSystemToken = !isOfficialType;
-	const isNewApi = siteForm.site_type === "new-api";
+	const needsSystemToken = supportsSystemCredentials(siteForm.site_type);
+	const canScheduleCheckin = supportsSiteCheckin(siteForm.site_type);
 	const checkinTask = taskReports.checkin;
 	const verifyActiveTask = taskReports["verify-active"];
 	const verifyDisabledTask = taskReports["verify-disabled"];
@@ -1880,7 +1881,7 @@ export const ChannelsView = ({
 								const isActive = site.status === "active";
 								const isToday = site.last_checkin_date === today;
 								const message = isToday ? site.last_checkin_message : null;
-								const canCheckin = site.site_type === "new-api";
+								const canCheckin = supportsSiteCheckin(site.site_type);
 								const checkinDisabled = !canCheckin;
 								const systemReady = Boolean(
 									site.system_token && site.system_userid,
@@ -2003,7 +2004,7 @@ export const ChannelsView = ({
 												type="button"
 												disabled={checkinPending || checkinDisabled}
 												title={
-													checkinDisabled ? "仅 new-api 支持签到" : undefined
+													checkinDisabled ? "当前上游不支持签到" : undefined
 												}
 												onClick={() => {
 													if (!canCheckin) {
@@ -2110,7 +2111,7 @@ export const ChannelsView = ({
 							<div class="app-list-body divide-y divide-white/60">
 								{pagedSites.map((site) => {
 									const isActive = site.status === "active";
-									const canCheckin = site.site_type === "new-api";
+									const canCheckin = supportsSiteCheckin(site.site_type);
 									const checkinDisabled = !canCheckin;
 									const callTokenCount = site.call_tokens?.length ?? 0;
 									const coolingCount = getSiteCoolingModelCount(site);
@@ -2228,9 +2229,7 @@ export const ChannelsView = ({
 														type="button"
 														disabled={checkinPending || checkinDisabled}
 														title={
-															checkinDisabled
-																? "仅 new-api 支持签到"
-																: undefined
+															checkinDisabled ? "当前上游不支持签到" : undefined
 														}
 														onClick={() => {
 															if (!canCheckin) {
@@ -2395,14 +2394,17 @@ export const ChannelsView = ({
 										class="mb-1.5 block text-xs uppercase tracking-widest text-[color:var(--app-ink-muted)]"
 										for="site-base"
 									>
-										基础 URL{isOfficialType ? "（可留空）" : ""}
+										基础 URL
+										{getDefaultBaseUrlForSiteType(siteForm.site_type)
+											? "（可留空）"
+											: ""}
 									</label>
 									<Input
 										id="site-base"
 										name="base_url"
 										placeholder="https://api.example.com"
 										value={siteForm.base_url}
-										required={!isOfficialType}
+										required={!getDefaultBaseUrlForSiteType(siteForm.site_type)}
 										onInput={(event) =>
 											onFormChange({
 												base_url: (event.currentTarget as HTMLInputElement)
@@ -2547,7 +2549,7 @@ export const ChannelsView = ({
 										/>
 									</div>
 									<div class="mt-3 grid gap-3 md:grid-cols-2">
-										{isNewApi && (
+										{canScheduleCheckin && (
 											<div class="flex items-center justify-between gap-3 rounded-xl border border-white/60 bg-white/70 px-3 py-2">
 												<div>
 													<p class="text-xs font-semibold uppercase tracking-widest text-[color:var(--app-ink-muted)]">
@@ -2567,7 +2569,9 @@ export const ChannelsView = ({
 										)}
 										<Input
 											placeholder={
-												isNewApi ? "签到地址（可选）" : "外部签到地址（可选）"
+												canScheduleCheckin
+													? "签到地址（可选）"
+													: "外部签到地址（可选）"
 											}
 											value={siteForm.checkin_url}
 											onInput={(event) =>

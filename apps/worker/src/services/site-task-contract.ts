@@ -1,5 +1,10 @@
-import type { ChannelTokenTestItem, ChannelTokenTestSummary } from "./channel-testing";
+import type {
+	ChannelTokenTestItem,
+	ChannelTokenTestSummary,
+} from "./channel-testing";
 import type { CheckinResultItem } from "./checkin";
+import type { ProviderType } from "./channel-metadata";
+import type { SiteType } from "./site-metadata";
 
 export type SiteTaskToken = {
 	id?: string;
@@ -9,6 +14,8 @@ export type SiteTaskToken = {
 
 export type SiteTaskTestRequest = {
 	base_url: string;
+	siteType?: SiteType;
+	provider?: ProviderType;
 	tokens: SiteTaskToken[];
 };
 
@@ -36,6 +43,8 @@ export type SiteTaskProbeChannel = {
 	name: string;
 	base_url: string;
 	api_key: string;
+	siteType?: SiteType;
+	provider?: ProviderType;
 };
 
 export type SiteTaskProbeResult = {
