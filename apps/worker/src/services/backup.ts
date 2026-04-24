@@ -4,7 +4,10 @@ import {
 	type ChannelInsertInput,
 	updateChannel,
 } from "./channel-repo";
-import { replaceCallTokensForChannel } from "./channel-call-token-repo";
+import {
+	listCallTokens,
+	replaceCallTokensForChannel,
+} from "./channel-call-token-repo";
 import {
 	BACKUP_LOCAL_ONLY_SETTING_KEYS,
 	isBackupLocalOnlySettingKey,
@@ -151,17 +154,6 @@ type ChannelRow = {
 	last_checkin_status: string | null;
 	last_checkin_message: string | null;
 	last_checkin_at: string | null;
-	created_at: string | null;
-	updated_at: string | null;
-};
-
-type CallTokenRow = {
-	id: string;
-	channel_id: string;
-	name: string;
-	api_key: string;
-	priority: number | null;
-	models_json: string | null;
 	created_at: string | null;
 	updated_at: string | null;
 };
@@ -502,17 +494,9 @@ export async function createBackupPayload(
 		.all<ChannelRow>();
 	const channelRows = channelsResult.results ?? [];
 	const channelIds = channelRows.map((row) => row.id);
-	let callTokenRows: CallTokenRow[] = [];
-	if (channelIds.length > 0) {
-		const placeholders = channelIds.map(() => "?").join(", ");
-		const callTokenResult = await db
-			.prepare(
-				`SELECT * FROM channel_call_tokens WHERE channel_id IN (${placeholders}) ORDER BY channel_id ASC, priority ASC, created_at ASC, id ASC`,
-			)
-			.bind(...channelIds)
-			.all<CallTokenRow>();
-		callTokenRows = callTokenResult.results ?? [];
-	}
+	const callTokenRows = await listCallTokens(db, {
+		channelIds: channelIds.length > 0 ? channelIds : null,
+	});
 	const callTokenMap = new Map<string, BackupCallTokenRecord[]>();
 	for (const row of callTokenRows) {
 		const list = callTokenMap.get(row.channel_id) ?? [];
