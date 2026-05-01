@@ -32,6 +32,9 @@ import {
 } from "./core/constants";
 import {
 	filterSites,
+	getRefreshFailedTokenLabels,
+	getRefreshFailureDetails,
+	getVerificationFailedTokenIssues,
 	getSuggestedActionLabel,
 	getVerificationStageTone,
 	getVerificationVerdictLabel,
@@ -1239,6 +1242,9 @@ const App = () => {
 				const success = nextItems.filter(
 					(entry) => entry.status === "success",
 				).length;
+				const warning = nextItems.filter(
+					(entry) => entry.status === "warning",
+				).length;
 				return {
 					...prev,
 					"refresh-active": {
@@ -1248,7 +1254,8 @@ const App = () => {
 							summary: {
 								total: nextItems.length,
 								success,
-								failed: nextItems.length - success,
+								warning,
+								failed: nextItems.length - success - warning,
 							},
 							items: nextItems,
 							runs_at: runsAt,
@@ -2480,9 +2487,31 @@ const App = () => {
 				});
 				await loadSites();
 				syncRefreshTaskItem(result, new Date().toISOString());
+				const failedTokens = getRefreshFailedTokenLabels(result);
+				const failureDetails = getRefreshFailureDetails(result);
 				pushNotice(
 					result.status === "success" ? "success" : "warning",
-					`${site.name || "站点"}：${result.message}`,
+					result.status === "warning"
+						? `${site.name || "站点"}：${result.message}${
+								failedTokens.length > 0
+									? `\n失败令牌：${failedTokens.join("、")}`
+									: ""
+							}`
+						: result.status === "failed" && failureDetails.length > 0
+							? `${site.name || "站点"}：${result.message}\n${failureDetails
+									.map((detail) =>
+										[
+											`令牌：${
+												detail.tokens.length > 0
+													? detail.tokens.join("、")
+													: "未标记令牌"
+											}`,
+											`失败码：${detail.code}`,
+											`失败原因：${detail.reason}`,
+										].join("\n"),
+									)
+									.join("\n")}`
+							: `${site.name || "站点"}：${result.message}`,
 				);
 			} catch (error) {
 				pushNotice("error", (error as Error).message);
@@ -2524,10 +2553,19 @@ const App = () => {
 				pushNotice("info", "当前没有启用渠道可更新");
 				return;
 			}
+			const firstProblemItem = report.items.find(
+				(item) => item.status === "failed" || item.status === "warning",
+			);
 			pushNotice(
-				report.summary.failed > 0 ? "warning" : "success",
-				report.summary.failed > 0
-					? `更新完成，失败 ${report.summary.failed} 个。`
+				report.summary.failed > 0 || report.summary.warning > 0
+					? "warning"
+					: "success",
+				report.summary.failed > 0 || report.summary.warning > 0
+					? `更新完成，失败 ${report.summary.failed} 个，部分成功 ${report.summary.warning} 个。${
+							firstProblemItem?.message
+								? ` 首个异常：${firstProblemItem.message}`
+								: ""
+						}`
 					: "更新完成。",
 			);
 		} catch (error) {
@@ -2920,6 +2958,26 @@ const App = () => {
 								</p>
 							</div>
 						</div>
+						{getVerificationFailedTokenIssues(siteVerificationDialog.result)
+							.length > 0 ? (
+							<div class="mt-4 rounded-2xl border border-white/60 bg-white/75 px-4 py-4">
+								<p class="text-xs uppercase tracking-widest text-[color:var(--app-ink-muted)]">
+									失败令牌
+								</p>
+								<div class="mt-2 space-y-2">
+									{getVerificationFailedTokenIssues(
+										siteVerificationDialog.result,
+									).map((detail, index) => (
+										<p
+											class="break-words text-xs leading-5 text-[color:var(--app-ink)]"
+											key={`verification-token-failure:${index}`}
+										>
+											{detail}
+										</p>
+									))}
+								</div>
+							</div>
+						) : null}
 						<DialogFooter>
 							<Button
 								size="sm"

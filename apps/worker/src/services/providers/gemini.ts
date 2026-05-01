@@ -2,6 +2,7 @@ import {
 	applyHeaderOverrides,
 	buildBaseHeaders,
 	buildModelsEndpoint,
+	ensureJsonContentType,
 	performModelDiscovery,
 	resolveEndpointOverride,
 	toTextContent,
@@ -48,8 +49,7 @@ export const geminiProviderAdapter: ProviderAdapter = {
 		return true;
 	},
 	discoverModels(baseUrl, apiKey, fetcher) {
-		const headers = new Headers();
-		headers.set("Content-Type", "application/json");
+		const headers = ensureJsonContentType(new Headers());
 		headers.set("x-goog-api-key", apiKey);
 		return performModelDiscovery({
 			target: buildModelsEndpoint(baseUrl, "/v1beta/models"),

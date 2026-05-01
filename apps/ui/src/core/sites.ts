@@ -4,6 +4,7 @@ import {
 } from "../../../shared-core/src";
 import type {
 	Site,
+	SiteChannelRefreshItem,
 	SiteVerificationBatchSummary,
 	SiteVerificationResult,
 	VerificationVerdict,
@@ -112,6 +113,168 @@ export const getPrimaryVerificationIssue = (result: SiteVerificationResult) => {
 		return result.stages.capability.message;
 	}
 	return result.message;
+};
+
+export const getVerificationFailedTokenIssues = (
+	result: SiteVerificationResult,
+) =>
+	(result.token_results ?? [])
+		.filter((item) => !item.ok)
+		.map((item) => {
+			const tokenLabel =
+				String(item.tokenName ?? "").trim() ||
+				String(item.tokenId ?? "").trim() ||
+				"主调用令牌";
+			const statusLabel =
+				item.httpStatus === null || item.httpStatus === undefined
+					? "请求失败"
+					: `HTTP ${item.httpStatus}`;
+			const detail = String(item.detail ?? "").trim();
+			return detail
+				? `${tokenLabel}：${statusLabel} | ${detail}`
+				: `${tokenLabel}：${statusLabel}`;
+		});
+
+const splitRefreshTokenLabels = (value: string | null | undefined) =>
+	String(value ?? "")
+		.split("、")
+		.map((item) => item.trim())
+		.filter(Boolean);
+
+const isLikelyHtmlPayload = (value: string) =>
+	/<!doctype\s+html/i.test(value) ||
+	/<html[\s>]/i.test(value) ||
+	/<head[\s>]/i.test(value) ||
+	/<body[\s>]/i.test(value);
+
+const summarizeHtmlFailureDetail = (html: string) => {
+	const title = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim() ?? "";
+	const headline = html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim() ?? "";
+	const server =
+		html
+			.match(/<center>([^<]+)<\/center>\s*(?:<script|<\/body|<\/html)/i)?.[1]
+			?.trim() ?? "";
+	const primary = headline || title;
+	if (primary && server && primary !== server) {
+		return `${primary} | ${server}`;
+	}
+	if (primary || server) {
+		return primary || server;
+	}
+	return "未找到失败原因";
+};
+
+const stripReferenceSuffix = (value: string) =>
+	value
+		.replace(/\s*[;,]?\s*reference\s*=\s*[A-Za-z0-9_-]+/giu, "")
+		.replace(/\s*[;,]\s*$/u, "")
+		.trim();
+
+const normalizeRefreshFailureReason = (value: string) => {
+	const normalized = String(value ?? "")
+		.replace(/\s+/gu, " ")
+		.trim();
+	if (!normalized) {
+		return "未找到失败原因";
+	}
+	if (isLikelyHtmlPayload(normalized)) {
+		return summarizeHtmlFailureDetail(normalized);
+	}
+	return stripReferenceSuffix(normalized) || "未找到失败原因";
+};
+
+export type RefreshFailureDetail = {
+	tokens: string[];
+	code: string;
+	reason: string;
+};
+
+export const getRefreshFailedTokenLabels = (item: SiteChannelRefreshItem) => {
+	const direct = (item.failed_tokens ?? [])
+		.map((token) => String(token ?? "").trim())
+		.filter(Boolean);
+	if (direct.length > 0) {
+		return Array.from(new Set(direct));
+	}
+	return Array.from(
+		new Set(
+			String(item.detail_message ?? "")
+				.split("；")
+				.map((entry) => entry.trim())
+				.filter(Boolean)
+				.flatMap((entry) => {
+					const separatorIndex = entry.indexOf("：");
+					if (separatorIndex < 0) {
+						return [];
+					}
+					return splitRefreshTokenLabels(entry.slice(0, separatorIndex));
+				}),
+		),
+	);
+};
+
+export const getRefreshSuccessfulTokenLabels = (item: SiteChannelRefreshItem) =>
+	Array.from(
+		new Set(
+			(item.successful_tokens ?? [])
+				.map((token) => String(token ?? "").trim())
+				.filter(Boolean),
+		),
+	);
+
+export const getRefreshFailureDetails = (
+	item: SiteChannelRefreshItem,
+): RefreshFailureDetail[] => {
+	const directGroups = (item.failure_groups ?? []).filter(
+		(group) =>
+			Array.isArray(group.tokens) &&
+			typeof group.code === "string" &&
+			typeof group.reason === "string",
+	);
+	if (directGroups.length > 0) {
+		return directGroups.map((group) => ({
+			tokens: group.tokens
+				.map((token) => String(token ?? "").trim())
+				.filter(Boolean),
+			code: String(group.code ?? "").trim() || "请求失败",
+			reason: String(group.reason ?? "").trim() || "未找到失败原因",
+		}));
+	}
+	const details = String(item.detail_message ?? "")
+		.split("；")
+		.map((entry) => entry.trim())
+		.filter(Boolean);
+	if (details.length === 0) {
+		return [];
+	}
+	return Array.from(
+		new Set(
+			details.map((entry) => {
+				const separatorIndex = entry.indexOf("：");
+				const tokens =
+					separatorIndex < 0
+						? []
+						: splitRefreshTokenLabels(entry.slice(0, separatorIndex));
+				const rawReason =
+					separatorIndex < 0
+						? entry
+						: entry.slice(separatorIndex + 1).trim() || entry;
+				const codeMatch = rawReason.match(/HTTP\s+([A-Za-z0-9_-]+)/iu);
+				const code = codeMatch?.[1] ? codeMatch[1] : "请求失败";
+				const normalizedReason = normalizeRefreshFailureReason(
+					rawReason.replace(/^HTTP\s+[A-Za-z0-9_-]+\s*\|\s*/iu, "").trim(),
+				);
+				const reason =
+					!normalizedReason ||
+					normalizedReason.toLowerCase() ===
+						`error code: ${code.toLowerCase()}` ||
+					normalizedReason.toLowerCase() === code.toLowerCase()
+						? "未找到失败原因"
+						: normalizedReason;
+				return JSON.stringify({ tokens, code, reason });
+			}),
+		),
+	).map((detail) => JSON.parse(detail) as RefreshFailureDetail);
 };
 
 export const getVerificationSeverityRank = (verdict: VerificationVerdict) => {

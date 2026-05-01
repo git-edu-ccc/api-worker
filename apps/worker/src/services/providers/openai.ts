@@ -3,6 +3,7 @@ import {
 	applyHeaderOverrides,
 	buildBaseHeaders,
 	buildModelsEndpoint,
+	ensureJsonContentType,
 	performModelDiscovery,
 	resolveEndpointOverride,
 	toNumber,
@@ -16,8 +17,7 @@ export const openAiProviderAdapter: ProviderAdapter = {
 		return true;
 	},
 	discoverModels(baseUrl, apiKey, fetcher) {
-		const headers = new Headers();
-		headers.set("Content-Type", "application/json");
+		const headers = ensureJsonContentType(new Headers());
 		headers.set("Authorization", `Bearer ${apiKey}`);
 		headers.set("x-api-key", apiKey);
 		return performModelDiscovery({

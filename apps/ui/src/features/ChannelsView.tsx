@@ -27,8 +27,12 @@ import {
 	getSiteCoolingModelCount,
 	getSiteStatusLabel,
 	getPrimaryVerificationIssue,
+	getRefreshFailedTokenLabels,
+	getRefreshFailureDetails,
+	getRefreshSuccessfulTokenLabels,
 	getSuggestedActionLabel,
 	getSiteTypeLabel,
+	getVerificationFailedTokenIssues,
 	getVerificationSeverityLabel,
 	getVerificationSeverityRank,
 	getVerificationVerdictLabel,
@@ -212,6 +216,37 @@ const getCoolingSummaryLabel = (site: Site) => {
 		return "无";
 	}
 	return `${count} 个`;
+};
+
+const splitRefreshFailureMessage = (message: string) => {
+	const normalized = String(message ?? "").trim();
+	if (!normalized) {
+		return {
+			summary: "更新失败",
+			detail: null,
+		};
+	}
+	const prefix = "更新失败：";
+	if (normalized.startsWith(prefix)) {
+		return {
+			summary: "更新失败",
+			detail: normalized.slice(prefix.length).trim() || null,
+		};
+	}
+	return {
+		summary: normalized,
+		detail: null,
+	};
+};
+
+const getRefreshStatusLabel = (status: SiteChannelRefreshItem["status"]) => {
+	if (status === "failed") {
+		return "失败";
+	}
+	if (status === "warning") {
+		return "部分成功";
+	}
+	return "完成";
 };
 
 const getCoolingToneClass = (site: Site) => {
@@ -832,11 +867,13 @@ export const ChannelsView = ({
 		if (refreshTask.report.summary.total === 0) {
 			return `${formatTaskTime(refreshTask.runs_at)}  无站点`;
 		}
-		return `${formatTaskTime(refreshTask.runs_at)}  ${
-			refreshTask.report.summary.failed > 0
-				? `失败 ${refreshTask.report.summary.failed}`
-				: "完成"
-		}`;
+		if (refreshTask.report.summary.failed > 0) {
+			return `${formatTaskTime(refreshTask.runs_at)}  失败 ${refreshTask.report.summary.failed}`;
+		}
+		if (refreshTask.report.summary.warning > 0) {
+			return `${formatTaskTime(refreshTask.runs_at)}  部分成功 ${refreshTask.report.summary.warning}`;
+		}
+		return `${formatTaskTime(refreshTask.runs_at)}  完成`;
 	};
 	const getTaskStatusClass = (kind: SiteTaskKind) => {
 		if (!taskReports[kind]) {
@@ -868,7 +905,8 @@ export const ChannelsView = ({
 		}
 		return refreshTask &&
 			refreshTask.kind === "refresh-active" &&
-			refreshTask.report.summary.failed > 0
+			(refreshTask.report.summary.failed > 0 ||
+				refreshTask.report.summary.warning > 0)
 			? "border-amber-200 bg-amber-50/90 text-amber-700"
 			: "border-slate-200 bg-slate-50/90 text-slate-600";
 	};
@@ -1413,6 +1451,20 @@ export const ChannelsView = ({
 											<p class="text-xs text-[color:var(--app-ink)]">
 												{getPrimaryVerificationIssue(item)}
 											</p>
+											{getVerificationFailedTokenIssues(item).length > 0 ? (
+												<div class="space-y-1 rounded-lg bg-slate-50/80 px-2.5 py-2">
+													{getVerificationFailedTokenIssues(item).map(
+														(detail, index) => (
+															<p
+																class="break-words text-[11px] leading-5 text-[color:var(--app-ink-muted)]"
+																key={`${item.site_id}:token-failure:${index}`}
+															>
+																{detail}
+															</p>
+														),
+													)}
+												</div>
+											) : null}
 											<p class="text-[11px] text-[color:var(--app-ink-muted)]">
 												建议：{getSuggestedActionLabel(item.suggested_action)}
 											</p>
@@ -1554,6 +1606,20 @@ export const ChannelsView = ({
 												<p class="mt-1 text-xs text-[color:var(--app-ink)]">
 													{getPrimaryVerificationIssue(item)}
 												</p>
+												{getVerificationFailedTokenIssues(item).length > 0 ? (
+													<div class="mt-2 space-y-1 rounded-lg bg-slate-50/80 px-2.5 py-2">
+														{getVerificationFailedTokenIssues(item).map(
+															(detail, index) => (
+																<p
+																	class="break-words text-[11px] leading-5 text-[color:var(--app-ink-muted)]"
+																	key={`${item.site_id}:recovery-token-failure:${index}`}
+																>
+																	{detail}
+																</p>
+															),
+														)}
+													</div>
+												) : null}
 											</div>
 										</div>
 									))
@@ -1568,10 +1634,11 @@ export const ChannelsView = ({
 			return null;
 		}
 		const items = [...refreshTask.report.items].sort((left, right) => {
+			const rank = { failed: 0, warning: 1, success: 2 };
 			if (left.status === right.status) {
 				return left.site_name.localeCompare(right.site_name);
 			}
-			return left.status === "failed" ? -1 : 1;
+			return rank[left.status] - rank[right.status];
 		});
 		return (
 			<Dialog open={Boolean(activeReportTask)} onClose={closeTaskReport}>
@@ -1603,18 +1670,81 @@ export const ChannelsView = ({
 											{item.site_name}
 										</p>
 										<p class="text-[11px] text-[color:var(--app-ink-muted)]">
-											{item.status === "failed" ? "失败" : "完成"}
+											{getRefreshStatusLabel(item.status)}
 										</p>
 									</div>
 									<div class="space-y-1">
-										<p class="text-xs text-[color:var(--app-ink)]">
-											{item.message}
-										</p>
-										<p class="text-[11px] text-[color:var(--app-ink-muted)]">
-											{item.models.length > 0
-												? `${item.models.length} 个模型`
-												: "未更新模型"}
-										</p>
+										{(() => {
+											const parsed = splitRefreshFailureMessage(item.message);
+											const failedTokens = getRefreshFailedTokenLabels(item);
+											const successfulTokens =
+												getRefreshSuccessfulTokenLabels(item);
+											const failureDetails = getRefreshFailureDetails(item);
+											const shouldShowSummary =
+												item.status !== "failed" ||
+												(parsed.summary !== "更新失败" &&
+													parsed.summary !== item.site_name);
+											const shouldShowModelSummary =
+												item.status !== "failed" || failureDetails.length === 0;
+											return (
+												<>
+													{shouldShowSummary ? (
+														<p class="text-xs text-[color:var(--app-ink)]">
+															{parsed.summary}
+														</p>
+													) : null}
+													{item.status === "warning" ? (
+														<div class="space-y-2">
+															{successfulTokens.length > 0 ? (
+																<div class="rounded-lg bg-emerald-50/80 px-2.5 py-2">
+																	<p class="break-words text-[11px] leading-5 text-emerald-700">
+																		成功令牌：{successfulTokens.join("、")}
+																	</p>
+																</div>
+															) : null}
+															{failedTokens.length > 0 ? (
+																<div class="rounded-lg bg-amber-50/80 px-2.5 py-2">
+																	<p class="break-words text-[11px] leading-5 text-amber-700">
+																		失败令牌：{failedTokens.join("、")}
+																	</p>
+																</div>
+															) : null}
+														</div>
+													) : null}
+													{item.status === "failed" &&
+													failureDetails.length > 0 ? (
+														<div class="space-y-2">
+															{failureDetails.map((detail, index) => (
+																<div
+																	class="rounded-lg border border-rose-100 bg-rose-50/70 px-2.5 py-2"
+																	key={`${item.site_id}:detail:${index}`}
+																>
+																	<p class="break-words text-[11px] font-medium leading-5 text-rose-700">
+																		令牌：
+																		{detail.tokens.length > 0
+																			? detail.tokens.join("、")
+																			: "未标记令牌"}
+																	</p>
+																	<p class="break-words text-[11px] leading-5 text-rose-700/90">
+																		失败码：{detail.code}
+																	</p>
+																	<p class="break-words text-[11px] leading-5 text-rose-700/90">
+																		失败原因：{detail.reason}
+																	</p>
+																</div>
+															))}
+														</div>
+													) : null}
+													{shouldShowModelSummary ? (
+														<p class="text-[11px] text-[color:var(--app-ink-muted)]">
+															{item.models.length > 0
+																? `${item.models.length} 个模型`
+																: "未更新模型"}
+														</p>
+													) : null}
+												</>
+											);
+										})()}
 									</div>
 									<div class="flex justify-end">
 										<Button

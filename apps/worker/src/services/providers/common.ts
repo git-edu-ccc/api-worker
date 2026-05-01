@@ -3,6 +3,91 @@ import { normalizeBaseUrl } from "../../utils/url";
 import type { EndpointOverrides } from "../site-metadata";
 import type { ModelDiscoveryResult } from "./types";
 
+const MODEL_DISCOVERY_DETAIL_MAX_LENGTH = 180;
+
+function normalizeSummaryDetail(value: string | null): string | null {
+	if (!value) {
+		return null;
+	}
+	const normalized = value.replace(/\s+/gu, " ").trim();
+	if (!normalized) {
+		return null;
+	}
+	return normalized.slice(0, MODEL_DISCOVERY_DETAIL_MAX_LENGTH);
+}
+
+function isLikelyHtmlPayload(value: string): boolean {
+	return (
+		/<!doctype\s+html/i.test(value) ||
+		/<html[\s>]/i.test(value) ||
+		/<head[\s>]/i.test(value) ||
+		/<body[\s>]/i.test(value)
+	);
+}
+
+function summarizeHtmlFailureDetail(html: string): string | null {
+	const title = normalizeSummaryDetail(
+		html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? null,
+	);
+	const headline = normalizeSummaryDetail(
+		html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1] ?? null,
+	);
+	const server = normalizeSummaryDetail(
+		html.match(
+			/<center>([^<]+)<\/center>\s*(?:<script|<\/body|<\/html)/i,
+		)?.[1] ?? null,
+	);
+	const primary = headline ?? title;
+	if (!primary && !server) {
+		return "未找到失败原因";
+	}
+	if (primary && server && primary !== server) {
+		return `${primary} | ${server}`;
+	}
+	return primary ?? server;
+}
+
+async function readFailureDetail(response: Response): Promise<string | null> {
+	const contentType = response.headers.get("content-type") ?? "";
+	if (contentType.includes("application/json")) {
+		const payload = (await response
+			.clone()
+			.json()
+			.catch(() => null)) as Record<string, unknown> | null;
+		if (payload && typeof payload === "object") {
+			const candidates = [payload.error, payload.message, payload.detail];
+			for (const candidate of candidates) {
+				if (typeof candidate === "string" && candidate.trim()) {
+					return normalizeSummaryDetail(candidate);
+				}
+				if (
+					candidate &&
+					typeof candidate === "object" &&
+					!Array.isArray(candidate)
+				) {
+					const record = candidate as Record<string, unknown>;
+					for (const nested of [
+						record.message,
+						record.error,
+						record.detail,
+						record.code,
+						record.type,
+					]) {
+						if (typeof nested === "string" && nested.trim()) {
+							return normalizeSummaryDetail(nested);
+						}
+					}
+				}
+			}
+		}
+	}
+	const text = await response.text().catch(() => "");
+	if (isLikelyHtmlPayload(text)) {
+		return summarizeHtmlFailureDetail(text);
+	}
+	return normalizeSummaryDetail(text);
+}
+
 export async function performModelDiscovery(options: {
 	target: string;
 	headers: Headers;
@@ -17,13 +102,28 @@ export async function performModelDiscovery(options: {
 			method: "GET",
 			headers: options.headers,
 		});
-	} catch {
-		return { ok: false, elapsed: Date.now() - start, models: [] };
+	} catch (error) {
+		return {
+			ok: false,
+			elapsed: Date.now() - start,
+			models: [],
+			httpStatus: null,
+			detail:
+				error instanceof Error && error.message
+					? normalizeSummaryDetail(error.message)
+					: "network_error",
+		};
 	}
 
 	const elapsed = Date.now() - start;
 	if (!response.ok) {
-		return { ok: false, elapsed, models: [] };
+		return {
+			ok: false,
+			elapsed,
+			models: [],
+			httpStatus: response.status,
+			detail: await readFailureDetail(response),
+		};
 	}
 
 	const payload = (await response.json().catch(() => ({}))) as unknown;
@@ -50,6 +150,11 @@ export function applyHeaderOverrides(
 	for (const [key, value] of Object.entries(overrides)) {
 		headers.set(key, value);
 	}
+	return headers;
+}
+
+export function ensureJsonContentType(headers: Headers): Headers {
+	headers.set("Content-Type", "application/json");
 	return headers;
 }
 

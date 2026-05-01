@@ -11,6 +11,8 @@ export type ModelDiscoveryResult = {
 	elapsed: number;
 	models: string[];
 	payload?: unknown;
+	httpStatus?: number | null;
+	detail?: string | null;
 };
 
 export type ProviderAdapter = {

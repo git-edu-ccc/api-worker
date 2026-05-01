@@ -10,6 +10,7 @@ import { collectVerifiedTokenModelUpdates } from "./site-verification-token-mode
 import { inspectSuccessfulResponse } from "./successful-response";
 import {
 	type ChannelTokenTestItem,
+	summarizeChannelTokenFailures,
 	updateChannelTestResult,
 	testChannelTokens,
 } from "./channel-testing";
@@ -21,6 +22,7 @@ import {
 import { normalizeChatRequest } from "./provider-transform";
 import { getProviderAdapter } from "./providers";
 import { buildProviderChatRequest } from "./providers/chat-request";
+import { ensureJsonContentType } from "./providers/common";
 
 export type VerificationStageStatus = "pass" | "warn" | "fail" | "skip";
 
@@ -455,10 +457,17 @@ export async function verifySiteChannel(options: {
 		};
 		discoveredModels = summary.models;
 		verifiedTokens = mergeVerificationTokenModels(tokens, tokenResults);
+		const tokenFailureSummary = summarizeChannelTokenFailures(summary.items);
 		if (summary.ok && summary.models.length > 0) {
-			capability.status = "pass";
-			capability.code = "models_discovered";
-			capability.message = `已发现 ${summary.models.length} 个可验证模型。`;
+			if (summary.failed > 0) {
+				capability.status = "warn";
+				capability.code = "models_partially_discovered";
+				capability.message = `已发现 ${summary.models.length} 个可验证模型，但部分调用令牌失败。`;
+			} else {
+				capability.status = "pass";
+				capability.code = "models_discovered";
+				capability.message = `已发现 ${summary.models.length} 个可验证模型。`;
+			}
 		} else {
 			capability.status = "warn";
 			capability.code = "model_discovery_failed";
@@ -713,6 +722,7 @@ export async function verifySiteChannel(options: {
 		selectedToken.api_key,
 		metadata.header_overrides,
 	);
+	ensureJsonContentType(headers);
 	const startedAt = Date.now();
 	try {
 		const response = await fetcher(target, {

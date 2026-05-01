@@ -99,6 +99,15 @@ export type SiteVerificationResult = {
 		name?: string;
 	} | null;
 	discovered_models: string[];
+	token_results: Array<{
+		tokenId?: string;
+		tokenName?: string;
+		ok: boolean;
+		elapsed: number;
+		models: string[];
+		httpStatus?: number | null;
+		detail?: string | null;
+	}>;
 	token_summary: {
 		total: number;
 		success: number;
@@ -132,14 +141,23 @@ export type SiteVerificationBatchReport = {
 export type SiteChannelRefreshItem = {
 	site_id: string;
 	site_name: string;
-	status: "success" | "failed";
+	status: "success" | "warning" | "failed";
 	message: string;
+	detail_message?: string | null;
+	successful_tokens?: string[];
+	failed_tokens?: string[];
+	failure_groups?: Array<{
+		tokens: string[];
+		code: string;
+		reason: string;
+	}>;
 	models: string[];
 };
 
 export type SiteChannelRefreshBatchSummary = {
 	total: number;
 	success: number;
+	warning: number;
 	failed: number;
 };
 

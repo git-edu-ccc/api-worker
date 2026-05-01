@@ -3,6 +3,7 @@ import {
 	applyHeaderOverrides,
 	buildBaseHeaders,
 	buildModelsEndpoint,
+	ensureJsonContentType,
 	performModelDiscovery,
 	toTextContent,
 } from "./common";
@@ -14,8 +15,7 @@ export const anthropicProviderAdapter: ProviderAdapter = {
 		return true;
 	},
 	discoverModels(baseUrl, apiKey, fetcher) {
-		const headers = new Headers();
-		headers.set("Content-Type", "application/json");
+		const headers = ensureJsonContentType(new Headers());
 		headers.set("x-api-key", apiKey);
 		headers.set("anthropic-version", "2023-06-01");
 		return performModelDiscovery({

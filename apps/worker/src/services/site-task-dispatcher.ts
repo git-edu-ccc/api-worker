@@ -32,7 +32,11 @@ import type {
 	SiteTaskTestRequest,
 	SiteTaskTestResponse,
 } from "./site-task-contract";
-import { testChannelTokens } from "./channel-testing";
+import {
+	summarizeChannelTokenFailures,
+	testChannelTokens,
+	type ChannelTokenTestItem,
+} from "./channel-testing";
 import { modelsToJson } from "./channel-models";
 import { parseChannelMetadata, resolveProvider } from "./channel-metadata";
 import { upsertChannelModelCapabilities } from "./channel-model-capabilities";
@@ -85,8 +89,16 @@ export type DisabledChannelRecoveryBatchResult = {
 export type SiteChannelRefreshItem = {
 	site_id: string;
 	site_name: string;
-	status: "success" | "failed";
+	status: "success" | "warning" | "failed";
 	message: string;
+	detail_message?: string | null;
+	successful_tokens?: string[];
+	failed_tokens?: string[];
+	failure_groups?: Array<{
+		tokens: string[];
+		code: string;
+		reason: string;
+	}>;
 	models: string[];
 };
 
@@ -94,6 +106,7 @@ export type SiteChannelRefreshBatchResult = {
 	summary: {
 		total: number;
 		success: number;
+		warning: number;
 		failed: number;
 	};
 	items: SiteChannelRefreshItem[];
@@ -208,6 +221,142 @@ function createTimeoutSignal(timeoutMs: number) {
 		signal: controller.signal,
 		clear: () => clearTimeout(timer),
 	};
+}
+
+function summarizeChannelFailureReasons(
+	items: ChannelTokenTestItem[],
+): string | null {
+	const failedItems = items.filter((item) => !item.ok);
+	if (failedItems.length === 0) {
+		return null;
+	}
+	const reasons = new Set<string>();
+	for (const item of failedItems) {
+		const statusLabel =
+			item.httpStatus === null || item.httpStatus === undefined
+				? "请求失败"
+				: `HTTP ${item.httpStatus}`;
+		const detail = normalizeFailureReasonDetail(
+			String(item.detail ?? "").trim(),
+		);
+		reasons.add(detail ? `${statusLabel} | ${detail}` : statusLabel);
+	}
+	return Array.from(reasons).join("；");
+}
+
+function isLikelyHtmlPayload(value: string): boolean {
+	return (
+		/<!doctype\s+html/i.test(value) ||
+		/<html[\s>]/i.test(value) ||
+		/<head[\s>]/i.test(value) ||
+		/<body[\s>]/i.test(value)
+	);
+}
+
+function summarizeHtmlFailureDetail(html: string): string {
+	const title = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim() ?? "";
+	const headline = html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim() ?? "";
+	const server =
+		html
+			.match(/<center>([^<]+)<\/center>\s*(?:<script|<\/body|<\/html)/i)?.[1]
+			?.trim() ?? "";
+	const primary = headline || title;
+	if (primary && server && primary !== server) {
+		return `${primary} | ${server}`;
+	}
+	if (primary || server) {
+		return primary || server;
+	}
+	return "未找到失败原因";
+}
+
+function stripReferenceSuffix(value: string): string {
+	return value
+		.replace(/\s*[;,]?\s*reference\s*=\s*[A-Za-z0-9_-]+/giu, "")
+		.replace(/\s*[;,]\s*$/u, "")
+		.trim();
+}
+
+function normalizeFailureReasonDetail(detail: string): string {
+	if (!detail) {
+		return "";
+	}
+	if (isLikelyHtmlPayload(detail)) {
+		return summarizeHtmlFailureDetail(detail);
+	}
+	return stripReferenceSuffix(detail.replace(/\s+/gu, " ").trim());
+}
+
+function extractFailureCode(item: ChannelTokenTestItem): string {
+	if (item.httpStatus !== null && item.httpStatus !== undefined) {
+		return String(item.httpStatus);
+	}
+	const detail = normalizeFailureReasonDetail(String(item.detail ?? "").trim());
+	const match = detail.match(/error code:\s*([A-Za-z0-9_-]+)/iu);
+	if (match?.[1]) {
+		return match[1];
+	}
+	return "请求失败";
+}
+
+function extractFailureReason(
+	item: ChannelTokenTestItem,
+	code: string,
+): string {
+	const detail = normalizeFailureReasonDetail(String(item.detail ?? "").trim());
+	if (!detail) {
+		return "未找到失败原因";
+	}
+	const normalized = detail.replace(/\s+/gu, " ").trim();
+	if (!normalized) {
+		return "未找到失败原因";
+	}
+	const lower = normalized.toLowerCase();
+	const lowerCode = String(code).trim().toLowerCase();
+	if (
+		lower === `http ${lowerCode}` ||
+		lower === `error code: ${lowerCode}` ||
+		lower === lowerCode
+	) {
+		return "未找到失败原因";
+	}
+	return normalized;
+}
+
+function buildChannelFailureGroups(items: ChannelTokenTestItem[]) {
+	const groups = new Map<
+		string,
+		{
+			tokens: string[];
+			code: string;
+			reason: string;
+		}
+	>();
+	for (const item of items) {
+		if (item.ok) {
+			continue;
+		}
+		const tokenLabel =
+			String(item.tokenName ?? "").trim() ||
+			String(item.tokenId ?? "").trim() ||
+			"主调用令牌";
+		const code = extractFailureCode(item);
+		const reason = extractFailureReason(item, code);
+		const groupKey = `${code}@@${reason}`;
+		const current = groups.get(groupKey);
+		if (current) {
+			if (!current.tokens.includes(tokenLabel)) {
+				current.tokens.push(tokenLabel);
+			}
+			continue;
+		}
+		groups.set(groupKey, {
+			tokens: [tokenLabel],
+			code,
+			reason,
+		});
+	}
+	return Array.from(groups.values());
 }
 
 async function readInternalError(
@@ -552,6 +701,10 @@ async function refreshChannelModels(
 			site_name: "",
 			status: "failed",
 			message: "站点不存在",
+			detail_message: null,
+			successful_tokens: [],
+			failed_tokens: [],
+			failure_groups: [],
 			models: [],
 		};
 	}
@@ -580,12 +733,34 @@ async function refreshChannelModels(
 		provider,
 		tokens,
 	});
+	const successfulTokens = result.items
+		.filter((item) => item.ok)
+		.map(
+			(item) =>
+				String(item.tokenName ?? "").trim() ||
+				String(item.tokenId ?? "").trim() ||
+				"主调用令牌",
+		);
+	const failedTokens = result.items
+		.filter((item) => !item.ok)
+		.map(
+			(item) =>
+				String(item.tokenName ?? "").trim() ||
+				String(item.tokenId ?? "").trim() ||
+				"主调用令牌",
+		);
 	if (!result.ok || result.models.length === 0) {
+		const failureSummary = summarizeChannelFailureReasons(result.items);
+		const failureGroups = buildChannelFailureGroups(result.items);
 		return {
 			site_id: channel.id,
 			site_name: channel.name,
 			status: "failed",
-			message: result.ok ? "未拉取到模型" : "更新失败",
+			message: result.ok ? "模型接口返回成功，但未发现任何模型" : "更新失败",
+			detail_message: failureSummary,
+			successful_tokens: successfulTokens,
+			failed_tokens: failedTokens,
+			failure_groups: failureGroups,
 			models: [],
 		};
 	}
@@ -601,11 +776,19 @@ async function refreshChannelModels(
 		await updateCallTokenModels(db, item.tokenId, item.models, updatedAt);
 	}
 	await upsertChannelModelCapabilities(db, channel.id, result.models);
+	const failureSummary =
+		result.failed > 0 ? summarizeChannelTokenFailures(result.items) : null;
 	return {
 		site_id: channel.id,
 		site_name: channel.name,
-		status: "success",
-		message: `已更新 ${result.models.length} 个模型`,
+		status: failureSummary ? "warning" : "success",
+		message: failureSummary
+			? `已更新 ${result.models.length} 个模型，但部分令牌失败`
+			: `已更新 ${result.models.length} 个模型`,
+		detail_message: failureSummary,
+		successful_tokens: successfulTokens,
+		failed_tokens: failedTokens,
+		failure_groups: [],
 		models: result.models,
 	};
 }
@@ -639,6 +822,8 @@ export async function refreshChannelById(
 			site_name: channel.name,
 			status: "failed",
 			message: "仅启用渠道可更新",
+			detail_message: null,
+			failure_groups: [],
 			models: [],
 		};
 	}
@@ -660,6 +845,7 @@ export async function refreshActiveChannelsViaWorker(
 			summary: {
 				total: 0,
 				success: 0,
+				warning: 0,
 				failed: 0,
 			},
 			items: [],
@@ -678,17 +864,21 @@ export async function refreshActiveChannelsViaWorker(
 					site_name: channel.name,
 					status: "failed" as const,
 					message: err instanceof Error ? err.message : "未知的执行异常",
+					detail_message: null,
+					failure_groups: [],
 					models: [],
 				};
 			}
 		},
 	);
 	const success = items.filter((item) => item.status === "success").length;
+	const warning = items.filter((item) => item.status === "warning").length;
 	return {
 		summary: {
 			total: items.length,
 			success,
-			failed: items.length - success,
+			warning,
+			failed: items.length - success - warning,
 		},
 		items,
 		runsAt: new Date().toISOString(),
